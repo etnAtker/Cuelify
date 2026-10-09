@@ -1,0 +1,55 @@
+<Styles xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <Style Selector="Window">
+    <Setter Property="FontFamily" Value="Segoe UI, Microsoft YaHei UI" />
+    <Setter Property="FontSize" Value="{StaticResource Font.Body}" />
+    <Setter Property="Background" Value="{DynamicResource Brush.Canvas}" />
+    <Setter Property="Foreground" Value="{DynamicResource Brush.Text}" />
+  </Style>
+  <Style Selector="TextBlock.title"><Setter Property="FontSize" Value="{StaticResource Font.Title}" /><Setter Property="FontWeight" Value="SemiBold" /></Style>
+  <Style Selector="TextBlock.section"><Setter Property="FontSize" Value="16" /><Setter Property="FontWeight" Value="SemiBold" /><Setter Property="Margin" Value="0,8,0,4" /></Style>
+  <Style Selector="TextBlock.muted"><Setter Property="Foreground" Value="{DynamicResource Brush.Muted}" /><Setter Property="TextWrapping" Value="Wrap" /></Style>
+  <Style Selector="TextBlock.error"><Setter Property="Foreground" Value="{DynamicResource Brush.Error}" /><Setter Property="TextWrapping" Value="Wrap" /></Style>
+  <Style Selector="Border.surface"><Setter Property="Background" Value="{DynamicResource Brush.Surface}" /><Setter Property="CornerRadius" Value="{StaticResource Radius.Surface}" /><Setter Property="Padding" Value="{StaticResource Inset.Section}" /></Style>
+  <Style Selector="TextBox"><Setter Property="MinHeight" Value="36" /></Style>
+  <Style Selector="Button"><Setter Property="MinHeight" Value="36" /></Style>
+  <Style Selector="ListBoxItem"><Setter Property="HorizontalContentAlignment" Value="Stretch" /></Style>
+  <Style Selector="TabItem"><Setter Property="FontSize" Value="14" /></Style>
+  <Style Selector="Button.navigation">
+    <Setter Property="HorizontalAlignment" Value="Stretch" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="MinHeight" Value="64" />
+    <Setter Property="Padding" Value="4,8" />
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+  </Style>
+  <Style Selector="Button.navigation.current">
+    <Setter Property="Background" Value="{DynamicResource Brush.Canvas}" />
+    <Setter Property="Foreground" Value="{DynamicResource Brush.Accent}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Brush.Accent}" />
+    <Setter Property="BorderThickness" Value="2,0,0,0" />
+  </Style>
+  <Style Selector="Button.step">
+    <Setter Property="MinHeight" Value="44" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Brush.Divider}" />
+    <Setter Property="BorderThickness" Value="0,0,0,2" />
+  </Style>
+  <Style Selector="Button.step.current">
+    <Setter Property="Foreground" Value="{DynamicResource Brush.Accent}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Brush.Accent}" />
+  </Style>
+  <Style Selector="Button.step:disabled /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="{DynamicResource Brush.Muted}" />
+  </Style>
+  <Style Selector="Button.step.current:disabled /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Foreground" Value="{DynamicResource Brush.Accent}" />
+  </Style>
+  <Style Selector="StackPanel.settings-form">
+    <Setter Property="MaxWidth" Value="720" />
+    <Setter Property="HorizontalAlignment" Value="Stretch" />
+    <Setter Property="Margin" Value="0,20,24,12" />
+  </Style>
+</Styles>

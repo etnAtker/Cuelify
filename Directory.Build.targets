@@ -1,0 +1,8 @@
+<Project>
+  <!-- NuGet 原生内容包在无 RID 的引用类库中会复制所有平台；仅保留本项目支持的 win-x64。 -->
+  <Target Name="CuelifyFilterNativeAssets" BeforeTargets="AssignTargetPaths;GetCopyToOutputDirectoryItems;GetCopyToPublishDirectoryItems">
+    <ItemGroup>
+      <Content Remove="@(Content)" Condition="$([System.String]::Copy('%(Content.Link)').Replace('\','/').Replace('//','/').StartsWith('runtimes/')) and !$([System.String]::Copy('%(Content.Link)').Replace('\','/').Replace('//','/').StartsWith('runtimes/win-x64/'))" />
+    </ItemGroup>
+  </Target>
+</Project>

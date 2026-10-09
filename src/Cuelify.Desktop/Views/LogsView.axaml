@@ -1,0 +1,24 @@
+<UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:vm="using:Cuelify.Desktop.ViewModels" x:Class="Cuelify.Desktop.Views.LogsView" x:DataType="vm:MainWindowViewModel">
+  <Grid RowDefinitions="Auto,*" Margin="32,24">
+    <Grid ColumnDefinitions="*,Auto">
+      <StackPanel Spacing="6"><TextBlock Classes="title" Text="日志" /><TextBlock Classes="muted" Text="查看处理记录与翻译请求。" /></StackPanel>
+      <Button Grid.Column="1" Content="返回工作台" Command="{Binding ShowWorkspaceCommand}" VerticalAlignment="Center" />
+    </Grid>
+    <TabControl Grid.Row="1" Margin="0,24,0,0">
+      <TabItem Header="运行日志">
+        <ListBox ItemsSource="{Binding Log}" Margin="0,16,0,0" AutomationProperties.Name="运行日志">
+          <ListBox.ItemTemplate><DataTemplate x:DataType="x:String"><TextBlock Text="{Binding .}" TextWrapping="Wrap" /></DataTemplate></ListBox.ItemTemplate>
+        </ListBox>
+      </TabItem>
+      <TabItem Header="请求预览">
+        <Grid RowDefinitions="Auto,*" Margin="0,16,0,0">
+          <StackPanel Spacing="8" Margin="0,0,0,12">
+            <TextBlock Classes="muted" Text="预览本次任务首批字幕的翻译请求，不会发送请求。" />
+            <Button Content="更新预览" Command="{Binding PreviewRequestCommand}" HorizontalAlignment="Left" />
+          </StackPanel>
+          <TextBox Grid.Row="1" Text="{Binding Preview, Mode=OneWay}" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" AutomationProperties.Name="翻译请求预览" />
+        </Grid>
+      </TabItem>
+    </TabControl>
+  </Grid>
+</UserControl>

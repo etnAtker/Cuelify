@@ -1,0 +1,318 @@
+[
+  {
+    "Package": "Avalonia/11.3.12",
+    "License": "MIT",
+    "Authors": "Avalonia Team",
+    "Copyright": "Copyright 2013-2026 © The AvaloniaUI Project",
+    "Source": "https://github.com/AvaloniaUI/Avalonia/",
+    "Commit": "37fbd9655cc581ff5b1c6b1fb1be4e3118c889d0",
+    "LicenseFiles": [
+      "Avalonia-NuGet-LICENSE.txt"
+    ]
+  },
+  {
+    "Package": "Avalonia.Angle.Windows.Natives/2.1.25547.20250602",
+    "License": "LICENSE",
+    "Authors": "Avalonia Team",
+    "Copyright": "Copyright 2013-2025 © The AvaloniaUI Project",
+    "Source": "https://github.com/AvaloniaUI/angle/",
+    "Commit": "cb8b4e1307a9d8f5ff56b8c5973bea4158ffead8",
+    "LicenseFiles": [
+      "Avalonia.Angle.Windows.Natives-NuGet-LICENSE.txt"
+    ]
+  },
+  {
+    "Package": "Avalonia.Remote.Protocol/11.3.12",
+    "License": "MIT",
+    "Authors": "Avalonia Team",
+    "Copyright": "Copyright 2013-2026 © The AvaloniaUI Project",
+    "Source": "https://github.com/AvaloniaUI/Avalonia/",
+    "Commit": "37fbd9655cc581ff5b1c6b1fb1be4e3118c889d0",
+    "LicenseFiles": [
+      "Avalonia-NuGet-LICENSE.txt"
+    ]
+  },
+  {
+    "Package": "Avalonia.Skia/11.3.12",
+    "License": "MIT",
+    "Authors": "Avalonia Team",
+    "Copyright": "Copyright 2013-2026 © The AvaloniaUI Project",
+    "Source": "https://github.com/AvaloniaUI/Avalonia/",
+    "Commit": "37fbd9655cc581ff5b1c6b1fb1be4e3118c889d0",
+    "LicenseFiles": [
+      "Avalonia-NuGet-LICENSE.txt"
+    ]
+  },
+  {
+    "Package": "Avalonia.Themes.Fluent/11.3.12",
+    "License": "MIT",
+    "Authors": "Avalonia Team",
+    "Copyright": "Copyright 2013-2026 © The AvaloniaUI Project",
+    "Source": "https://github.com/AvaloniaUI/Avalonia/",
+    "Commit": "37fbd9655cc581ff5b1c6b1fb1be4e3118c889d0",
+    "LicenseFiles": [
+      "Avalonia-NuGet-LICENSE.txt"
+    ]
+  },
+  {
+    "Package": "Avalonia.Win32/11.3.12",
+    "License": "MIT",
+    "Authors": "Avalonia Team",
+    "Copyright": "Copyright 2013-2026 © The AvaloniaUI Project",
+    "Source": "https://github.com/AvaloniaUI/Avalonia/",
+    "Commit": "37fbd9655cc581ff5b1c6b1fb1be4e3118c889d0",
+    "LicenseFiles": [
+      "Avalonia-NuGet-LICENSE.txt"
+    ]
+  },
+  {
+    "Package": "CommunityToolkit.HighPerformance/8.4.2",
+    "License": "MIT",
+    "Authors": "Microsoft",
+    "Copyright": "(c) .NET Foundation and Contributors. All rights reserved.",
+    "Source": "https://github.com/CommunityToolkit/dotnet",
+    "Commit": "35dfe7b12da0e64384bfaec7ebc0883196a89f9f",
+    "LicenseFiles": [
+      "CommunityToolkit.HighPerformance-NuGet-License.md",
+      "CommunityToolkit.HighPerformance-NuGet-ThirdPartyNotices.txt"
+    ]
+  },
+  {
+    "Package": "CommunityToolkit.Mvvm/8.4.2",
+    "License": "MIT",
+    "Authors": "Microsoft",
+    "Copyright": "(c) .NET Foundation and Contributors. All rights reserved.",
+    "Source": "https://github.com/CommunityToolkit/dotnet",
+    "Commit": "35dfe7b12da0e64384bfaec7ebc0883196a89f9f",
+    "LicenseFiles": [
+      "CommunityToolkit.HighPerformance-NuGet-License.md",
+      "CommunityToolkit.HighPerformance-NuGet-ThirdPartyNotices.txt"
+    ]
+  },
+  {
+    "Package": "HarfBuzzSharp/8.3.1.1",
+    "License": "MIT",
+    "Authors": "Microsoft",
+    "Copyright": "© Microsoft Corporation. All rights reserved.",
+    "Source": "https://go.microsoft.com/fwlink/?linkid=868515",
+    "Commit": "64f24b1cddb68d30ec0ac6b661964178fc21d5ec",
+    "LicenseFiles": [
+      "HarfBuzzSharp-NuGet-LICENSE.txt"
+    ]
+  },
+  {
+    "Package": "HarfBuzzSharp.NativeAssets.Win32/8.3.1.1",
+    "License": "MIT",
+    "Authors": "Microsoft",
+    "Copyright": "© Microsoft Corporation. All rights reserved.",
+    "Source": "https://go.microsoft.com/fwlink/?linkid=868515",
+    "Commit": "64f24b1cddb68d30ec0ac6b661964178fc21d5ec",
+    "LicenseFiles": [
+      "HarfBuzzSharp-NuGet-LICENSE.txt",
+      "HarfBuzzSharp.NativeAssets.Win32-NuGet-THIRD-PARTY-NOTICES.txt"
+    ]
+  },
+  {
+    "Package": "LLamaSharp/0.27.0",
+    "License": "MIT",
+    "Authors": "Rinne, Martin Evans, jlsantiago and all the other contributors in https://github.com/SciSharp/LLamaSharp/graphs/contributors.",
+    "Copyright": "MIT, SciSharp STACK 2026",
+    "Source": "https://github.com/SciSharp/LLamaSharp",
+    "Commit": "7cbbc45e421d55794d5050d126e0b96511007007",
+    "LicenseFiles": [
+      "LLamaSharp-NuGet-LICENSE.txt"
+    ]
+  },
+  {
+    "Package": "MicroCom.Runtime/0.11.0",
+    "License": "MIT",
+    "Authors": "MicroCom.Runtime",
+    "Copyright": "Copyright 2021 © Nikita Tsukanov",
+    "Source": "https://github.com/kekekeks/MicroCom",
+    "Commit": null,
+    "LicenseFiles": [
+      "MicroCom.Runtime-NuGet-LICENSE.txt"
+    ]
+  },
+  {
+    "Package": "Microsoft.Bcl.AsyncInterfaces/10.0.5",
+    "License": "MIT",
+    "Authors": "Microsoft",
+    "Copyright": "© Microsoft Corporation. All rights reserved.",
+    "Source": "https://github.com/dotnet/dotnet",
+    "Commit": "a612c2a1056fe3265387ae3ff7c94eba1505caf9",
+    "LicenseFiles": [
+      "Microsoft.Bcl.AsyncInterfaces-NuGet-THIRD-PARTY-NOTICES.txt"
+    ]
+  },
+  {
+    "Package": "Microsoft.Bcl.Memory/10.0.5",
+    "License": "MIT",
+    "Authors": "Microsoft",
+    "Copyright": "© Microsoft Corporation. All rights reserved.",
+    "Source": "https://github.com/dotnet/dotnet",
+    "Commit": "a612c2a1056fe3265387ae3ff7c94eba1505caf9",
+    "LicenseFiles": [
+      "Microsoft.Bcl.AsyncInterfaces-NuGet-THIRD-PARTY-NOTICES.txt"
+    ]
+  },
+  {
+    "Package": "Microsoft.Extensions.AI.Abstractions/10.4.1",
+    "License": "MIT",
+    "Authors": "Microsoft",
+    "Copyright": "© Microsoft Corporation. All rights reserved.",
+    "Source": "https://github.com/dotnet/extensions",
+    "Commit": "b797b53993672eae537cf2cebe6ad3cf58c507e6",
+    "LicenseFiles": [
+      "Microsoft.Extensions.AI.Abstractions-NuGet-LICENSE.txt"
+    ]
+  },
+  {
+    "Package": "Microsoft.Extensions.DependencyInjection.Abstractions/10.0.5",
+    "License": "MIT",
+    "Authors": "Microsoft",
+    "Copyright": "© Microsoft Corporation. All rights reserved.",
+    "Source": "https://github.com/dotnet/dotnet",
+    "Commit": "a612c2a1056fe3265387ae3ff7c94eba1505caf9",
+    "LicenseFiles": [
+      "Microsoft.Bcl.AsyncInterfaces-NuGet-THIRD-PARTY-NOTICES.txt"
+    ]
+  },
+  {
+    "Package": "Microsoft.Extensions.Logging.Abstractions/10.0.5",
+    "License": "MIT",
+    "Authors": "Microsoft",
+    "Copyright": "© Microsoft Corporation. All rights reserved.",
+    "Source": "https://github.com/dotnet/dotnet",
+    "Commit": "a612c2a1056fe3265387ae3ff7c94eba1505caf9",
+    "LicenseFiles": [
+      "Microsoft.Bcl.AsyncInterfaces-NuGet-THIRD-PARTY-NOTICES.txt"
+    ]
+  },
+  {
+    "Package": "Microsoft.ML.OnnxRuntime/1.30.0",
+    "License": "LICENSE",
+    "Authors": "Microsoft",
+    "Copyright": "© Microsoft Corporation. All rights reserved.",
+    "Source": "https://github.com/Microsoft/onnxruntime.git",
+    "Commit": "f2c39fe2f838cf35ce7da92824f5a5e3ee6e88a7",
+    "LicenseFiles": [
+      "Microsoft.ML.OnnxRuntime-NuGet-LICENSE.txt",
+      "Microsoft.ML.OnnxRuntime-NuGet-ThirdPartyNotices.txt"
+    ]
+  },
+  {
+    "Package": "Microsoft.ML.OnnxRuntime.Managed/1.30.0",
+    "License": "LICENSE.txt",
+    "Authors": "Microsoft",
+    "Copyright": "© Microsoft Corporation. All rights reserved.",
+    "Source": "https://github.com/microsoft/onnxruntime",
+    "Commit": "f2c39fe2f838cf35ce7da92824f5a5e3ee6e88a7",
+    "LicenseFiles": [
+      "Microsoft.ML.OnnxRuntime-NuGet-LICENSE.txt",
+      "Microsoft.ML.OnnxRuntime-NuGet-ThirdPartyNotices.txt"
+    ]
+  },
+  {
+    "Package": "SkiaSharp/2.88.9",
+    "License": "MIT",
+    "Authors": "Microsoft",
+    "Copyright": "© Microsoft Corporation. All rights reserved.",
+    "Source": "https://github.com/mono/SkiaSharp",
+    "Commit": "9699cdf046a989423a5e5eca68e7fd813486d81c",
+    "LicenseFiles": [
+      "HarfBuzzSharp-NuGet-LICENSE.txt",
+      "HarfBuzzSharp.NativeAssets.Win32-NuGet-THIRD-PARTY-NOTICES.txt"
+    ]
+  },
+  {
+    "Package": "SkiaSharp.NativeAssets.Win32/2.88.9",
+    "License": "MIT",
+    "Authors": "Microsoft",
+    "Copyright": "© Microsoft Corporation. All rights reserved.",
+    "Source": "https://github.com/mono/SkiaSharp",
+    "Commit": "9699cdf046a989423a5e5eca68e7fd813486d81c",
+    "LicenseFiles": [
+      "HarfBuzzSharp-NuGet-LICENSE.txt",
+      "HarfBuzzSharp.NativeAssets.Win32-NuGet-THIRD-PARTY-NOTICES.txt"
+    ]
+  },
+  {
+    "Package": "System.Interactive.Async/7.0.0",
+    "License": "MIT",
+    "Authors": ".NET Foundation and Contributors",
+    "Copyright": "Copyright (c) .NET Foundation and Contributors.",
+    "Source": "https://github.com/dotnet/reactive",
+    "Commit": "b1b81fbfe09298655b4dae5cfe0c2269e7323f4e",
+    "LicenseFiles": [
+      "System.Interactive.Async-NuGet-LICENSE.txt"
+    ]
+  },
+  {
+    "Package": "System.Linq.Async/7.0.0",
+    "License": "MIT",
+    "Authors": ".NET Foundation and Contributors",
+    "Copyright": "Copyright (c) .NET Foundation and Contributors.",
+    "Source": "https://github.com/dotnet/reactive",
+    "Commit": "b1b81fbfe09298655b4dae5cfe0c2269e7323f4e",
+    "LicenseFiles": [
+      "System.Interactive.Async-NuGet-LICENSE.txt"
+    ]
+  },
+  {
+    "Package": "System.Numerics.Tensors/10.0.5",
+    "License": "MIT",
+    "Authors": "Microsoft",
+    "Copyright": "© Microsoft Corporation. All rights reserved.",
+    "Source": "https://github.com/dotnet/dotnet",
+    "Commit": "a612c2a1056fe3265387ae3ff7c94eba1505caf9",
+    "LicenseFiles": [
+      "Microsoft.Bcl.AsyncInterfaces-NuGet-THIRD-PARTY-NOTICES.txt"
+    ]
+  },
+  {
+    "Package": "LLamaSharp.Backend.Vulkan.Windows/0.27.0",
+    "License": "MIT",
+    "Authors": "llama.cpp Authors",
+    "Copyright": "Copyright 2023 The llama.cpp Authors. All rights reserved.",
+    "Source": null,
+    "Commit": null,
+    "LicenseFiles": [
+      "LLamaSharp.Backend.Cpu-NuGet-LICENSE.txt"
+    ]
+  },
+  {
+    "Package": "LLamaSharp.Backend.Vulkan/0.27.0",
+    "License": "MIT",
+    "Authors": "llama.cpp Authors",
+    "Copyright": "Copyright 2023 The llama.cpp Authors. All rights reserved.",
+    "Source": null,
+    "Commit": null,
+    "LicenseFiles": [
+      "LLamaSharp.Backend.Cpu-NuGet-LICENSE.txt"
+    ]
+  },
+  {
+    "Package": "LLamaSharp.Backend.Cpu/0.27.0",
+    "License": "MIT",
+    "Authors": "llama.cpp Authors",
+    "Copyright": "Copyright 2023 The llama.cpp Authors. All rights reserved.",
+    "Source": null,
+    "Commit": null,
+    "LicenseFiles": [
+      "LLamaSharp.Backend.Cpu-NuGet-LICENSE.txt"
+    ]
+  },
+  {
+    "Package": "Microsoft.NETCore.App.Runtime.win-x64/10.0.9",
+    "License": "MIT",
+    "Authors": "Microsoft",
+    "Copyright": "© Microsoft Corporation. All rights reserved.",
+    "Source": "https://github.com/dotnet/dotnet",
+    "Commit": "901ca941248413c79832d2fdbd709da0c4386353",
+    "LicenseFiles": [
+      "Microsoft.Bcl.AsyncInterfaces-NuGet-THIRD-PARTY-NOTICES.txt",
+      "Microsoft.NETCore.App.Runtime.win-x64-NuGet-LICENSE.txt"
+    ]
+  }
+]

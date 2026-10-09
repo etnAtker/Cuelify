@@ -1,0 +1,26 @@
+<ResourceDictionary xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <x:Double x:Key="Font.Body">14</x:Double>
+  <x:Double x:Key="Font.Title">24</x:Double>
+  <Thickness x:Key="Inset.Section">20</Thickness>
+  <CornerRadius x:Key="Radius.Surface">8</CornerRadius>
+  <ResourceDictionary.ThemeDictionaries>
+    <ResourceDictionary x:Key="Light">
+      <SolidColorBrush x:Key="Brush.Canvas">#F5F7FA</SolidColorBrush>
+      <SolidColorBrush x:Key="Brush.Surface">#FFFFFF</SolidColorBrush>
+      <SolidColorBrush x:Key="Brush.Text">#17212F</SolidColorBrush>
+      <SolidColorBrush x:Key="Brush.Muted">#526172</SolidColorBrush>
+      <SolidColorBrush x:Key="Brush.Divider">#D5DBE3</SolidColorBrush>
+      <SolidColorBrush x:Key="Brush.Accent">#0F6CBD</SolidColorBrush>
+      <SolidColorBrush x:Key="Brush.Error">#B42318</SolidColorBrush>
+    </ResourceDictionary>
+    <ResourceDictionary x:Key="Dark">
+      <SolidColorBrush x:Key="Brush.Canvas">#14181F</SolidColorBrush>
+      <SolidColorBrush x:Key="Brush.Surface">#1D232D</SolidColorBrush>
+      <SolidColorBrush x:Key="Brush.Text">#F1F5FA</SolidColorBrush>
+      <SolidColorBrush x:Key="Brush.Muted">#B0BDCD</SolidColorBrush>
+      <SolidColorBrush x:Key="Brush.Divider">#465367</SolidColorBrush>
+      <SolidColorBrush x:Key="Brush.Accent">#67B7F5</SolidColorBrush>
+      <SolidColorBrush x:Key="Brush.Error">#FFB4AB</SolidColorBrush>
+    </ResourceDictionary>
+  </ResourceDictionary.ThemeDictionaries>
+</ResourceDictionary>

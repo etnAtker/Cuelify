@@ -1,0 +1,183 @@
+<UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:vm="using:Cuelify.Desktop.ViewModels" x:Class="Cuelify.Desktop.Views.SettingsView" x:DataType="vm:MainWindowViewModel">
+  <Grid RowDefinitions="Auto,Auto,*,Auto" Margin="32,24">
+    <Grid ColumnDefinitions="*,Auto">
+      <StackPanel Spacing="6">
+        <TextBlock Classes="title" Text="设置" />
+        <TextBlock Classes="muted" Text="{Binding SettingsHint}" />
+      </StackPanel>
+      <Button Grid.Column="1" Content="返回工作台" Command="{Binding ShowWorkspaceCommand}" VerticalAlignment="Center" />
+    </Grid>
+    <TextBlock Grid.Row="1" Classes="error" Text="{Binding Error}" Margin="0,12,0,0" />
+    <TabControl Grid.Row="2" SelectedIndex="{Binding SettingsSectionIndex}" Margin="0,20,0,20">
+      <TabItem Header="语音识别">
+        <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+          <StackPanel Classes="settings-form" Spacing="10" IsEnabled="{Binding CanConfigure}">
+            <TextBlock Text="ElevenLabs API 密钥" />
+            <TextBox AutomationProperties.Name="ElevenLabs API 密钥" Text="{Binding ElevenLabsKey}" PasswordChar="●" />
+            <TextBlock Classes="muted" Text="音频将上传至 ElevenLabs 识别，可能产生费用。密钥仅在本次使用期间保留。" />
+            <Expander Header="识别与音频高级参数">
+              <StackPanel Spacing="8">
+                <TextBlock Text="语音识别模型" />
+                <TextBox Text="{Binding Settings.AsrModel}" AutomationProperties.Name="语音识别模型" />
+                <TextBlock Text="识别语言代码（留空自动识别）" />
+                <TextBox Text="{Binding Settings.SourceCode}" AutomationProperties.Name="识别语言代码（留空自动识别）" />
+                <TextBlock Text="FFmpeg 路径" />
+                <TextBox Text="{Binding Settings.FfmpegPath}" AutomationProperties.Name="FFmpeg 路径" />
+                <TextBlock Text="ffprobe 路径" />
+                <TextBox Text="{Binding Settings.FfprobePath}" AutomationProperties.Name="ffprobe 路径" />
+                <TextBlock Text="Silero ONNX 路径" />
+                <TextBox Text="{Binding Settings.VadPath}" AutomationProperties.Name="Silero ONNX 路径" />
+                <TextBlock Text="目标分片时长 / 秒" />
+                <NumericUpDown Value="{Binding Settings.ChunkTargetSeconds}" Minimum="1" Maximum="3600" AutomationProperties.Name="目标分片时长 / 秒" />
+                <TextBlock Text="最大分片时长 / 秒" />
+                <NumericUpDown Value="{Binding Settings.ChunkMaximumSeconds}" Minimum="1" Maximum="36000" AutomationProperties.Name="最大分片时长 / 秒" />
+                <TextBlock Text="切点前后搜索时长 / 秒" />
+                <NumericUpDown Value="{Binding Settings.ChunkSearchSeconds}" Minimum="0" Maximum="300" AutomationProperties.Name="切点前后搜索时长 / 秒" />
+                <TextBlock Text="音频片段重叠时长 / 毫秒" />
+                <NumericUpDown Value="{Binding Settings.OverlapMs}" Minimum="0" Maximum="1000" AutomationProperties.Name="音频片段重叠时长 / 毫秒" />
+                <TextBlock Text="语音检测阈值" />
+                <NumericUpDown Value="{Binding Settings.VadThreshold}" Minimum="0.01" Maximum="1" Increment="0.05" AutomationProperties.Name="语音检测阈值" />
+                <TextBlock Text="最短语音 / 毫秒" />
+                <NumericUpDown Value="{Binding Settings.MinimumSpeechMs}" Minimum="1" Maximum="3000" AutomationProperties.Name="最短语音 / 毫秒" />
+                <TextBlock Text="最短静音 / 毫秒" />
+                <NumericUpDown Value="{Binding Settings.MinimumSilenceMs}" Minimum="0" Maximum="3000" AutomationProperties.Name="最短静音 / 毫秒" />
+                <TextBlock Text="同时识别的片段数" />
+                <NumericUpDown Value="{Binding Settings.AsrConcurrency}" Minimum="1" Maximum="8" AutomationProperties.Name="同时识别的片段数" />
+                <TextBlock Text="单个音频上传上限 / 字节" />
+                <NumericUpDown Value="{Binding Settings.MaximumUploadBytes}" Minimum="100000" Maximum="2900000000" AutomationProperties.Name="单个音频上传上限 / 字节" />
+                <CheckBox Content="短音频也分片处理" IsChecked="{Binding Settings.AlwaysChunk}" />
+              </StackPanel>
+            </Expander>
+
+          </StackPanel>
+        </ScrollViewer>
+      </TabItem>
+      <TabItem Header="翻译服务">
+        <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+          <StackPanel Classes="settings-form" Spacing="10" IsEnabled="{Binding CanConfigure}">
+            <TextBlock Text="翻译引擎" />
+            <ComboBox AutomationProperties.Name="翻译引擎" ItemsSource="{Binding ProviderNames}" SelectedIndex="{Binding ProviderIndex}" HorizontalAlignment="Stretch" />
+            <StackPanel Spacing="8" IsVisible="{Binding IsCloud}">
+              <TextBlock Text="翻译服务 API 密钥" />
+              <TextBox Text="{Binding TranslationKey}" PasswordChar="●" AutomationProperties.Name="翻译服务 API 密钥" />
+              <TextBlock Classes="muted" Text="密钥仅在本次使用期间保留。" />
+              <TextBlock Text="服务地址（Base URL）" />
+              <TextBox Text="{Binding Settings.BaseUrl}" AutomationProperties.Name="服务地址（Base URL）" />
+              <TextBlock Text="模型名称" />
+              <TextBox Text="{Binding Settings.CloudModel}" AutomationProperties.Name="模型名称" />
+              <StackPanel IsVisible="{Binding IsDeepSeek}" Spacing="8">
+                <CheckBox Content="启用思考模式" IsChecked="{Binding Settings.ThinkingEnabled}" />
+                <TextBlock Text="思考强度" />
+                <ComboBox ItemsSource="{Binding EffortNames}" SelectedIndex="{Binding ThinkingEffortIndex}" IsEnabled="{Binding Settings.ThinkingEnabled}" AutomationProperties.Name="思考强度" />
+                <TextBlock Classes="muted" Text="思考模式下，部分生成参数不可用。" />
+              </StackPanel>
+            </StackPanel>
+            <StackPanel Spacing="8" IsVisible="{Binding IsLocal}">
+              <TextBlock Classes="muted" Text="使用官方 Hy-MT2-1.8B-Q4_K_M.gguf 模型，需要支持 Vulkan 的显卡。" />
+              <Button Content="选择模型文件…" Command="{Binding ChooseModelCommand}" />
+              <TextBlock Text="模型文件路径" />
+              <TextBox Text="{Binding Settings.ModelPath}" AutomationProperties.Name="模型文件路径" />
+              <TextBlock Text="GPU 卸载层数" />
+              <NumericUpDown Value="{Binding Settings.GpuLayers}" Minimum="1" Maximum="99" AutomationProperties.Name="GPU 卸载层数" />
+              <TextBlock Text="上下文长度 / token" />
+              <NumericUpDown Value="{Binding Settings.ContextSize}" Minimum="512" Maximum="32768" Increment="512" AutomationProperties.Name="上下文长度 / token" />
+              <TextBlock Text="最大输出长度 / token" />
+              <NumericUpDown Value="{Binding Settings.LocalMaximumTokens}" Minimum="8" Maximum="4096" AutomationProperties.Name="最大输出长度 / token" />
+            </StackPanel>
+            <Button Content="{Binding TestEngineButtonText}" Command="{Binding TestEngineCommand}" />
+            <TextBlock Classes="muted" Text="{Binding EngineStatus}" />
+            <TextBlock Classes="muted" Text="{Binding EngineTestHint}" />
+            <Expander Header="翻译高级参数">
+              <StackPanel Spacing="8">
+                <TextBlock Text="原文语言" />
+                <TextBox Text="{Binding Settings.SourceLanguage}" AutomationProperties.Name="原文语言" />
+                <TextBlock Text="译文风格" />
+                <TextBox Text="{Binding Settings.TargetStyle}" AutomationProperties.Name="译文风格" />
+                <TextBlock Text="超时 / 秒" />
+                <NumericUpDown Value="{Binding Settings.TimeoutSeconds}" Minimum="1" Maximum="600" AutomationProperties.Name="超时 / 秒" />
+                <TextBlock Text="最多请求次数（含首次请求）" />
+                <NumericUpDown Value="{Binding Settings.MaximumAttempts}" Minimum="1" Maximum="5" AutomationProperties.Name="最多请求次数（含首次请求）" />
+                <TextBlock Text="参考前文条数" />
+                <NumericUpDown Value="{Binding Settings.ContextCues}" Minimum="0" Maximum="8" AutomationProperties.Name="参考前文条数" />
+                <TextBlock Text="上下文字符上限" />
+                <NumericUpDown Value="{Binding Settings.MaximumContextCharacters}" Minimum="0" Maximum="20000" AutomationProperties.Name="上下文字符上限" />
+                <StackPanel IsVisible="{Binding IsCloud}" Spacing="8">
+                  <TextBlock Text="每批字幕条数" />
+                  <NumericUpDown Value="{Binding Settings.BatchSize}" Minimum="1" Maximum="100" AutomationProperties.Name="每批字幕条数" />
+                  <TextBlock Text="批次字符上限" />
+                  <NumericUpDown Value="{Binding Settings.MaximumBatchCharacters}" Minimum="100" Maximum="50000" AutomationProperties.Name="批次字符上限" />
+                  <TextBlock Text="同时翻译的批次数" />
+                  <NumericUpDown Value="{Binding Settings.TranslationConcurrency}" Minimum="1" Maximum="2" AutomationProperties.Name="同时翻译的批次数" />
+                  <TextBlock Classes="muted" Text="可选参数留空时使用服务默认值。" />
+                  <StackPanel IsEnabled="{Binding CanEditSampling}" Spacing="8">
+                    <TextBlock Text="温度（temperature）" />
+                    <TextBox Text="{Binding Settings.Temperature}" AutomationProperties.Name="温度（temperature）" />
+                    <TextBlock Text="重复惩罚（frequency_penalty）" />
+                    <TextBox Text="{Binding Settings.FrequencyPenalty}" AutomationProperties.Name="重复惩罚（frequency_penalty）" />
+                    <TextBlock Text="新词倾向（presence_penalty）" />
+                    <TextBox Text="{Binding Settings.PresencePenalty}" AutomationProperties.Name="新词倾向（presence_penalty）" />
+                  </StackPanel>
+                  <TextBlock Text="采样范围（top_p）" />
+                  <TextBlock Classes="muted" Text="{Binding TopPHint}" />
+                  <TextBox Text="{Binding Settings.TopP}" IsEnabled="{Binding CanEditTopP}" AutomationProperties.Name="采样范围（top_p）" />
+                  <TextBlock Text="最大输出长度（max_tokens）" />
+                  <TextBox Text="{Binding Settings.MaximumTokens}" AutomationProperties.Name="最大输出长度（max_tokens）" />
+                  <StackPanel IsVisible="{Binding IsCompatible}" Spacing="8">
+                    <TextBlock Text="思考参数类型" />
+                    <ComboBox ItemsSource="{Binding ReasoningCapabilityNames}" SelectedIndex="{Binding ReasoningCapabilityIndex}" AutomationProperties.Name="思考参数类型" />
+                    <TextBlock Text="思考强度（reasoning_effort）" />
+                    <TextBlock Classes="muted" Text="仅适用于支持该参数的服务和模型。" />
+                    <TextBox Text="{Binding Settings.ReasoningEffort}" AutomationProperties.Name="思考强度（reasoning_effort）" />
+                  </StackPanel>
+                  <TextBlock Text="自定义请求参数（JSON）" />
+                  <TextBox Text="{Binding Settings.AdvancedJson}" AcceptsReturn="True" MinHeight="100" TextWrapping="Wrap" AutomationProperties.Name="自定义请求参数（JSON）" />
+                </StackPanel>
+              </StackPanel>
+            </Expander>
+          </StackPanel>
+        </ScrollViewer>
+      </TabItem>
+      <TabItem Header="提示词">
+        <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+          <StackPanel Classes="settings-form" Spacing="10" IsEnabled="{Binding CanConfigure}">
+            <TextBlock Text="翻译引擎" />
+            <ComboBox ItemsSource="{Binding ProviderNames}" SelectedIndex="{Binding ProviderIndex}" HorizontalAlignment="Stretch" AutomationProperties.Name="提示词所属引擎" />
+                <TextBlock Classes="muted" Text="每个翻译引擎分别保存提示词。保存后用于新的处理。" />
+                <ComboBox ItemsSource="{Binding AvailablePresets}" SelectedItem="{Binding PresetSelection}" AutomationProperties.Name="提示词预设" PlaceholderText="选择预设" />
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                  <Button Content="恢复默认" Command="{Binding ResetPromptCommand}" />
+                  <Button Content="简洁字幕预设" Command="{Binding ResetPromptCommand}" CommandParameter="通用简洁字幕" IsVisible="{Binding IsCloud}" />
+                </StackPanel>
+                <TextBlock Text="模板名称" />
+                <TextBox Text="{Binding ProfileName}" AutomationProperties.Name="模板名称" />
+                <TextBlock Classes="muted" Text="{Binding PromptVariables}" />
+                <TextBlock Text="系统提示词" />
+                <TextBlock Classes="muted" Text="{Binding SystemPromptHint}" />
+                <TextBox Text="{Binding SystemTemplate}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="160" AutomationProperties.Name="系统提示词" />
+                <TextBlock Text="用户提示词模板" />
+                <TextBox Text="{Binding UserTemplate}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="180" AutomationProperties.Name="用户提示词模板" />
+          </StackPanel>
+        </ScrollViewer>
+      </TabItem>
+      <TabItem Header="常规">
+        <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+          <StackPanel Classes="settings-form" Spacing="10" IsEnabled="{Binding CanConfigure}">
+            <TextBlock Classes="section" Text="外观" />
+            <TextBlock Text="主题" />
+            <ComboBox AutomationProperties.Name="外观主题" ItemsSource="{Binding ThemeNames}" SelectedItem="{Binding Settings.Theme}" HorizontalAlignment="Stretch" />
+            <CheckBox Content="减少动画" IsChecked="{Binding Settings.ReduceMotion}" />
+            <TextBlock Classes="section" Text="新任务的默认选项" />
+            <TextBlock Text="目标语言" />
+            <TextBox Text="{Binding Settings.TargetLanguage}" AutomationProperties.Name="默认目标语言" />
+            <TextBlock Classes="muted" Text="语音识别和翻译服务页面中的语言及引擎也作为新任务的默认选项。" />
+          </StackPanel>
+        </ScrollViewer>
+      </TabItem>
+    </TabControl>
+    <Grid Grid.Row="3" ColumnDefinitions="*,Auto,Auto">
+      <TextBlock Classes="muted" Text="{Binding SettingsStatus}" VerticalAlignment="Center" />
+      <Button Grid.Column="1" Content="取消" Command="{Binding CancelCommand}" IsVisible="{Binding IsBusy}" Margin="0,0,12,0" />
+      <Button Grid.Column="2" Content="保存设置" Command="{Binding SaveSettingsCommand}" Classes="accent" />
+    </Grid>
+  </Grid>
+</UserControl>

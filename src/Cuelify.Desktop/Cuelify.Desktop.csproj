@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <PlatformTarget>x64</PlatformTarget>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <PublishTrimmed>false</PublishTrimmed>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Avalonia.Win32" Version="11.3.12" />
+    <PackageReference Include="Avalonia.Skia" Version="11.3.12" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.12" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <ProjectReference Include="../Cuelify.Infrastructure/Cuelify.Infrastructure.csproj" />
+    <Content Include="../../assets/vad/silero_vad.onnx" Link="Assets/silero_vad.onnx" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Condition="Exists('../../assets/vad/silero_vad.onnx')" />
+    <Content Include="../../README.md" Link="README.md" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="../../LICENSE" Link="LICENSE" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="../../THIRD-PARTY-NOTICES.md" Link="THIRD-PARTY-NOTICES.md" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="../../docs/*.md" Link="docs/%(Filename)%(Extension)" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="../../licenses/*" Link="licenses/%(Filename)%(Extension)" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+  <Target Name="CuelifyCheckVadForPublish" BeforeTargets="PrepareForPublish">
+    <Error Condition="!Exists('../../assets/vad/silero_vad.onnx')" Text="缺少仓库资源 assets/vad/silero_vad.onnx，请恢复该固定 Silero 资源。" />
+  </Target>
+</Project>

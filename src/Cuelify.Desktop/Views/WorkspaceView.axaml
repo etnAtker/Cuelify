@@ -1,0 +1,105 @@
+<UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:vm="using:Cuelify.Desktop.ViewModels" x:Class="Cuelify.Desktop.Views.WorkspaceView" x:DataType="vm:MainWindowViewModel">
+  <Grid RowDefinitions="Auto,Auto,Auto,*,Auto" Margin="32,24">
+    <StackPanel Spacing="6">
+      <TextBlock Classes="title" Text="生成字幕" />
+      <TextBlock Classes="muted" Text="选择音视频，设置翻译选项，然后导出 SRT 字幕。" />
+    </StackPanel>
+    <Grid Grid.Row="1" ColumnDefinitions="*,Auto,*,Auto,*" Margin="0,24,0,20">
+      <Button Classes="step" Classes.current="{Binding IsFileStep}" Content="1　选择文件" Command="{Binding FileStepCommand}" HorizontalAlignment="Stretch" />
+      <TextBlock Grid.Column="1" Text="›" Classes="muted" VerticalAlignment="Center" Margin="12,0" />
+      <Button Grid.Column="2" Classes="step" Classes.current="{Binding IsOptionsStep}" Content="2　翻译选项" Command="{Binding OptionsStepCommand}" HorizontalAlignment="Stretch" />
+      <TextBlock Grid.Column="3" Text="›" Classes="muted" VerticalAlignment="Center" Margin="12,0" />
+      <Button Grid.Column="4" Classes="step" Classes.current="{Binding IsResultsStep}" Content="3　生成字幕" Command="{Binding ResultsStepCommand}" HorizontalAlignment="Stretch" />
+    </Grid>
+    <TextBlock Grid.Row="2" Classes="error" Text="{Binding Error}" Margin="0,0,0,12" />
+    <ScrollViewer Grid.Row="3" IsVisible="{Binding IsFileStep}" HorizontalScrollBarVisibility="Disabled">
+      <StackPanel MaxWidth="680" HorizontalAlignment="Stretch" Spacing="20" Margin="0,24">
+        <Border Classes="surface" BorderBrush="{DynamicResource Brush.Divider}" BorderThickness="1" Padding="32">
+          <StackPanel Spacing="16" HorizontalAlignment="Center">
+            <PathIcon Data="{StaticResource Icon.File}" Width="40" Height="40" Foreground="{DynamicResource Brush.Accent}" />
+            <TextBlock Classes="section" Text="选择视频或音频" HorizontalAlignment="Center" />
+            <TextBlock Classes="muted" Text="将一个文件拖到此页面，或点击下方按钮选择。" HorizontalAlignment="Center" />
+            <Button Content="选择文件…" Command="{Binding ChooseMediaCommand}" HorizontalAlignment="Center" Classes="accent" />
+          </StackPanel>
+        </Border>
+        <StackPanel Spacing="8" IsEnabled="{Binding CanConfigure}">
+          <TextBlock Text="文件路径" />
+          <TextBox Text="{Binding InputPath}" Watermark="视频或音频的完整路径" AutomationProperties.Name="文件路径" />
+          <TextBlock Classes="muted" Text="{Binding MediaSummary}" />
+        </StackPanel>
+        <TextBlock Classes="muted" Text="支持常见音视频格式，每次处理一个文件。" />
+        <Button Content="语音识别设置" Command="{Binding ConfigureSpeechCommand}" HorizontalAlignment="Left" />
+      </StackPanel>
+    </ScrollViewer>
+    <ScrollViewer Grid.Row="3" IsVisible="{Binding IsOptionsStep}" HorizontalScrollBarVisibility="Disabled">
+      <StackPanel MaxWidth="680" HorizontalAlignment="Stretch" Spacing="12">
+        <Border Classes="surface" Padding="16">
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBlock FontWeight="SemiBold" Text="{Binding FileName}" TextWrapping="Wrap" />
+            <TextBlock Grid.Column="1" Classes="muted" Text="{Binding MediaSummary}" Margin="16,0,0,0" />
+          </Grid>
+        </Border>
+        <StackPanel Spacing="8" IsEnabled="{Binding CanConfigure}">
+          <Grid ColumnDefinitions="*,16,*" RowDefinitions="Auto,Auto">
+            <TextBlock Text="原文语言" Margin="0,0,0,8" />
+            <TextBox Grid.Row="1" Text="{Binding TaskSourceLanguage}" Watermark="自动识别" AutomationProperties.Name="本次原文语言" />
+            <TextBlock Grid.Column="2" Text="目标语言" Margin="0,0,0,8" />
+            <TextBox Grid.Row="1" Grid.Column="2" Text="{Binding TaskTargetLanguage}" AutomationProperties.Name="本次目标语言" />
+          </Grid>
+          <TextBlock Text="翻译引擎" />
+          <ComboBox ItemsSource="{Binding ProviderNames}" SelectedIndex="{Binding TaskProviderIndex}" HorizontalAlignment="Stretch" AutomationProperties.Name="本次翻译引擎" />
+        </StackPanel>
+        <Grid ColumnDefinitions="*,Auto">
+          <StackPanel Spacing="6"><TextBlock Classes="muted" Text="{Binding TaskServiceSummary}" /><TextBlock Classes="muted" Text="{Binding TaskPromptSummary}" /></StackPanel>
+          <StackPanel Grid.Column="1" Spacing="8" Orientation="Horizontal"><Button Content="服务设置" Command="{Binding ConfigureTranslationCommand}" /><Button Content="编辑提示词" Command="{Binding ConfigurePromptCommand}" /></StackPanel>
+        </Grid>
+        <Expander Header="指定识别语言" IsEnabled="{Binding CanConfigure}">
+          <StackPanel Spacing="8"><TextBlock Classes="muted" Text="留空时自动识别；可填写 en、ja 等语言代码。" /><TextBox Text="{Binding TaskSourceCode}" AutomationProperties.Name="本次识别语言代码" /></StackPanel>
+        </Expander>
+        <TextBlock Classes="muted" Text="音频将发送至 ElevenLabs。选择云端翻译时，字幕原文也会发送至对应服务，可能产生费用。" />
+      </StackPanel>
+    </ScrollViewer>
+    <Grid Grid.Row="3" RowDefinitions="Auto,Auto,*" IsVisible="{Binding IsResultsStep}">
+      <Border Classes="surface" Margin="0,0,0,16">
+        <Grid ColumnDefinitions="*,Auto">
+          <StackPanel Spacing="8"><TextBlock FontWeight="SemiBold" Text="{Binding FileName}" TextWrapping="Wrap" /><TextBlock Text="{Binding Status}" /><ProgressBar IsIndeterminate="True" IsVisible="{Binding IsProcessing}" Height="4" /></StackPanel>
+          <StackPanel Grid.Column="1" Spacing="8" Margin="16,0,0,0" VerticalAlignment="Center"><TextBlock Classes="muted" Text="{Binding ResultSummary}" /><Button Content="重新翻译所选字幕" Command="{Binding RetryCueCommand}" /></StackPanel>
+        </Grid>
+      </Border>
+      <Grid Grid.Row="1" ColumnDefinitions="140,*,*" Margin="12,0,12,8">
+        <TextBlock Classes="muted" Text="序号 / 时间" VerticalAlignment="Center" />
+        <TextBlock Grid.Column="1" Classes="muted" Text="原文" VerticalAlignment="Center" />
+        <TextBlock Grid.Column="2" Classes="muted" Text="译文" VerticalAlignment="Center" />
+      </Grid>
+      <ListBox x:Name="CueList" Grid.Row="2" ItemsSource="{Binding Rows}" SelectedItem="{Binding SelectedCue}" AutomationProperties.Name="原文与译文对照">
+        <ListBox.ItemTemplate>
+          <DataTemplate x:DataType="vm:CueRow">
+            <Grid ColumnDefinitions="140,*,*" Margin="0,10">
+              <StackPanel Spacing="4"><TextBlock Text="{Binding Number}" /><TextBlock Classes="muted" FontSize="12" Text="{Binding Time}" TextWrapping="Wrap" /></StackPanel>
+              <TextBlock Grid.Column="1" Text="{Binding Source}" TextWrapping="Wrap" Margin="0,0,20,0" />
+              <TextBlock Grid.Column="2" Text="{Binding Translation}" TextWrapping="Wrap" />
+            </Grid>
+          </DataTemplate>
+        </ListBox.ItemTemplate>
+      </ListBox>
+      <StackPanel Grid.Row="2" IsVisible="{Binding !HasRows}" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="12">
+        <TextBlock Classes="section" Text="{Binding Status}" HorizontalAlignment="Center" />
+        <TextBlock Classes="muted" Text="识别完成后，字幕会显示在这里。" />
+      </StackPanel>
+    </Grid>
+    <Grid Grid.Row="4" ColumnDefinitions="*,Auto" Margin="0,20,0,0">
+      <StackPanel Orientation="Horizontal" Spacing="12">
+        <Button Content="上一步" Command="{Binding FileStepCommand}" IsVisible="{Binding IsOptionsStep}" />
+        <Button Content="调整选项" Command="{Binding OptionsStepCommand}" IsVisible="{Binding IsResultsStep}" />
+        <Button Content="新建任务" Command="{Binding NewTaskCommand}" IsVisible="{Binding IsResultsStep}" />
+      </StackPanel>
+      <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="12">
+        <Button Content="取消" Command="{Binding CancelCommand}" IsVisible="{Binding IsBusy}" />
+        <Button x:Name="NextButton" Content="下一步" Command="{Binding NextStepCommand}" IsVisible="{Binding IsFileStep}" Classes="accent" />
+        <Button x:Name="RunButton" Content="{Binding RunButtonText}" Command="{Binding RunCommand}" IsVisible="{Binding IsOptionsStep}" Classes="accent" />
+        <Button Content="继续处理" Command="{Binding RunCommand}" IsVisible="{Binding CanResume}" />
+        <Button x:Name="ExportButton" Content="导出 SRT…" Command="{Binding ExportCommand}" IsVisible="{Binding IsResultsStep}" Classes="accent" />
+      </StackPanel>
+    </Grid>
+  </Grid>
+</UserControl>

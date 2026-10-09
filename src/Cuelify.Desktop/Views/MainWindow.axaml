@@ -1,0 +1,23 @@
+<Window xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:vm="using:Cuelify.Desktop.ViewModels" xmlns:views="using:Cuelify.Desktop.Views" x:Class="Cuelify.Desktop.Views.MainWindow" x:DataType="vm:MainWindowViewModel" Title="Cuelify" Width="1240" Height="860" MinWidth="900" MinHeight="640">
+  <Grid ColumnDefinitions="80,*">
+    <Border Background="{DynamicResource Brush.Surface}" BorderBrush="{DynamicResource Brush.Divider}" BorderThickness="0,0,1,0">
+      <Grid RowDefinitions="Auto,Auto,Auto,*,Auto" Margin="8,20,8,16">
+        <TextBlock Text="C" FontSize="24" FontWeight="Bold" Foreground="{DynamicResource Brush.Accent}" HorizontalAlignment="Center" Margin="0,0,0,28" AutomationProperties.Name="Cuelify" />
+        <Button x:Name="WorkspaceNavigation" Grid.Row="1" Classes="navigation" Classes.current="{Binding IsWorkspace}" Command="{Binding ShowWorkspaceCommand}" AutomationProperties.Name="工作台" ToolTip.Tip="工作台">
+          <StackPanel Spacing="6"><PathIcon Data="{StaticResource Icon.Workspace}" Width="20" Height="20" /><TextBlock Text="工作台" FontSize="12" HorizontalAlignment="Center" /></StackPanel>
+        </Button>
+        <Button Grid.Row="2" Classes="navigation" Classes.current="{Binding IsLogs}" Command="{Binding ShowLogsCommand}" AutomationProperties.Name="日志" ToolTip.Tip="日志" Margin="0,8,0,0">
+          <StackPanel Spacing="6"><PathIcon Data="{StaticResource Icon.Logs}" Width="20" Height="20" /><TextBlock Text="日志" FontSize="12" HorizontalAlignment="Center" /></StackPanel>
+        </Button>
+        <Button Grid.Row="4" Classes="navigation" Classes.current="{Binding IsSettings}" Command="{Binding ShowSettingsCommand}" AutomationProperties.Name="设置" ToolTip.Tip="设置">
+          <StackPanel Spacing="6"><PathIcon Data="{StaticResource Icon.Settings}" Width="20" Height="20" /><TextBlock Text="设置" FontSize="12" HorizontalAlignment="Center" /></StackPanel>
+        </Button>
+      </Grid>
+    </Border>
+    <Grid Grid.Column="1">
+      <views:WorkspaceView x:Name="WorkspacePage" IsVisible="{Binding IsWorkspace}" />
+      <views:LogsView x:Name="LogsPage" IsVisible="{Binding IsLogs}" />
+      <views:SettingsView x:Name="SettingsPage" IsVisible="{Binding IsSettings}" />
+    </Grid>
+  </Grid>
+</Window>

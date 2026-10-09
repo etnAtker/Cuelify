@@ -1,0 +1,15 @@
+.idea/
+.vs/
+**/bin/
+**/obj/
+**/TestResults/
+artifacts/
+assets/models/
+assets/audio/
+*.gguf
+*.user
+*.suo
+.env
+.env.*
+Thumbs.db
+Desktop.ini

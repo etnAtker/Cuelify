@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Cuelify.Desktop/Cuelify.Desktop.csproj" />
+    <Project Path="src/Cuelify.Core/Cuelify.Core.csproj" />
+    <Project Path="src/Cuelify.Infrastructure/Cuelify.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Cuelify.Desktop.Tests/Cuelify.Desktop.Tests.csproj" />
+    <Project Path="tests/Cuelify.Tests/Cuelify.Tests.csproj" />
+  </Folder>
+</Solution>
