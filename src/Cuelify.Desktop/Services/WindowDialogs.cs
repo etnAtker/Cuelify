@@ -1,6 +1,9 @@
 using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Platform.Storage;
+using Avalonia.Threading;
+using Cuelify.Desktop.ViewModels;
+using Cuelify.Desktop.Views;
 
 namespace Cuelify.Desktop.Services;
 
@@ -8,12 +11,23 @@ public interface IWindowDialogs
 {
     Task<string?> OpenAsync(string title, string[] patterns);
     Task<string?> SaveSrtAsync(string suggestedName);
-    Task<bool> ConfirmAsync(string message);
+    Task<bool> ConfirmAsync(string message, CancellationToken token = default);
+    Task<bool> PasswordAsync(PasswordPurpose purpose, Func<string, string, Task> submit, CancellationToken token = default);
     Task CopyTextAsync(string text) => throw new NotSupportedException("剪贴板不可用。");
 }
 
 public sealed class WindowDialogs(Window owner) : IWindowDialogs
 {
+    public async Task<bool> PasswordAsync(PasswordPurpose purpose, Func<string, string, Task> submit, CancellationToken token = default)
+    {
+        var model = new MasterPasswordViewModel(purpose, submit);
+        var dialog = new MasterPasswordDialog { DataContext = model, RequestedThemeVariant = owner.ActualThemeVariant };
+        model.Completed += () => dialog.Close(true);
+        model.Cancelled += () => dialog.Close(false);
+        using var registration = token.Register(() => Dispatcher.UIThread.Post(() => { if (!model.IsBusy) dialog.Close(false); }));
+        try { token.ThrowIfCancellationRequested(); return await dialog.ShowDialog<bool>(owner); }
+        finally { model.Clear(); dialog.DataContext = null; }
+    }
     public Task CopyTextAsync(string text) => owner.Clipboard?.SetTextAsync(text) ??
         throw new InvalidOperationException("剪贴板不可用。");
 
@@ -33,7 +47,7 @@ public sealed class WindowDialogs(Window owner) : IWindowDialogs
         { Title = "导出 SRT", SuggestedFileName = suggestedName, DefaultExtension = "srt", FileTypeChoices = [new("SRT 字幕") { Patterns = ["*.srt"] }], ShowOverwritePrompt = true });
         return file?.TryGetLocalPath();
     }
-    public async Task<bool> ConfirmAsync(string message)
+    public async Task<bool> ConfirmAsync(string message, CancellationToken token = default)
     {
         var confirm = new Button { Content = "确认", MinWidth = 88 };
         var cancel = new Button { Content = "取消", MinWidth = 88 };
@@ -42,6 +56,8 @@ public sealed class WindowDialogs(Window owner) : IWindowDialogs
         cancel.Click += (_, _) => dialog.Close(false);
         dialog.Content = new StackPanel { Margin = new(24), Spacing = 20, Children =
         { new TextBlock { Text = message, TextWrapping = Avalonia.Media.TextWrapping.Wrap }, new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Spacing = 12, Children = { cancel, confirm } } } };
+        using var registration = token.Register(() => Dispatcher.UIThread.Post(() => dialog.Close(false)));
+        token.ThrowIfCancellationRequested();
         return await dialog.ShowDialog<bool>(owner);
     }
 }

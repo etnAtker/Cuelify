@@ -1,4 +1,4 @@
-<UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:vm="using:Cuelify.Desktop.ViewModels" x:Class="Cuelify.Desktop.Views.SettingsView" x:DataType="vm:MainWindowViewModel">
+<UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:vm="using:Cuelify.Desktop.ViewModels" xmlns:views="using:Cuelify.Desktop.Views" x:Class="Cuelify.Desktop.Views.SettingsView" x:DataType="vm:MainWindowViewModel">
   <Grid RowDefinitions="Auto,Auto,*,Auto" Margin="32,24">
     <Grid ColumnDefinitions="*,Auto">
       <StackPanel Spacing="6">
@@ -12,9 +12,10 @@
       <TabItem Header="语音识别">
         <ScrollViewer HorizontalScrollBarVisibility="Disabled">
           <StackPanel Classes="settings-form" Spacing="10" IsEnabled="{Binding CanConfigure}">
+            <views:CredentialStatusView />
             <TextBlock Text="ElevenLabs API 密钥" />
-            <TextBox AutomationProperties.Name="ElevenLabs API 密钥" Text="{Binding ElevenLabsKey}" PasswordChar="●" />
-            <TextBlock Classes="muted" Text="音频将上传至 ElevenLabs 识别，可能产生费用。密钥仅在本次使用期间保留。" />
+            <TextBox AutomationProperties.Name="ElevenLabs API 密钥" Text="{Binding ElevenLabsKey}" PasswordChar="●" IsEnabled="{Binding CanEditCredentials}" MaxLength="4096" />
+            <TextBlock Classes="muted" Text="音频将上传至 ElevenLabs 识别，可能产生费用。密钥通过主密码加密保存。" />
             <Expander Header="识别与音频高级参数">
               <StackPanel Spacing="8">
                 <TextBlock Text="语音识别模型" />
@@ -59,11 +60,16 @@
             <TextBlock Text="翻译引擎" />
             <ComboBox AutomationProperties.Name="翻译引擎" ItemsSource="{Binding ProviderNames}" SelectedIndex="{Binding ProviderIndex}" HorizontalAlignment="Stretch" />
             <StackPanel Spacing="8" IsVisible="{Binding IsCloud}">
+              <views:CredentialStatusView />
               <TextBlock Text="翻译服务 API 密钥" />
-              <TextBox Text="{Binding TranslationKey}" PasswordChar="●" AutomationProperties.Name="翻译服务 API 密钥" />
-              <TextBlock Classes="muted" Text="密钥仅在本次使用期间保留。" />
+              <TextBox Text="{Binding TranslationKey}" PasswordChar="●" IsEnabled="{Binding CanEditCredentials}" MaxLength="4096" AutomationProperties.Name="翻译服务 API 密钥" />
+              <TextBlock Classes="muted" Text="密钥通过主密码加密保存。" />
               <TextBlock Text="服务地址（Base URL）" />
               <TextBox Text="{Binding Settings.BaseUrl}" AutomationProperties.Name="服务地址（Base URL）" />
+              <StackPanel Spacing="8" IsVisible="{Binding NeedsAddressConfirmation}">
+                <TextBlock Classes="muted" Text="服务地址已变化，请确认已有密钥可用于新地址。" TextWrapping="Wrap" />
+                <Button Content="确认密钥用于此地址" Command="{Binding ConfirmCompatibleAddressCommand}" />
+              </StackPanel>
               <TextBlock Text="模型名称" />
               <TextBox Text="{Binding Settings.CloudModel}" AutomationProperties.Name="模型名称" />
               <StackPanel IsVisible="{Binding IsDeepSeek}" Spacing="8">
@@ -85,6 +91,7 @@
               <TextBlock Text="最大输出长度 / token" />
               <NumericUpDown Value="{Binding Settings.LocalMaximumTokens}" Minimum="8" Maximum="4096" AutomationProperties.Name="最大输出长度 / token" />
             </StackPanel>
+            <TextBlock Classes="muted" Text="{Binding EngineCredentialHint}" TextWrapping="Wrap" />
             <Button Content="{Binding TestEngineButtonText}" Command="{Binding TestEngineCommand}" />
             <TextBlock Classes="muted" Text="{Binding EngineStatus}" />
             <TextBlock Classes="muted" Text="{Binding EngineTestHint}" />
@@ -161,6 +168,12 @@
       <TabItem Header="常规">
         <ScrollViewer HorizontalScrollBarVisibility="Disabled">
           <StackPanel Classes="settings-form" Spacing="10" IsEnabled="{Binding CanConfigure}">
+            <TextBlock Classes="section" Text="主密码与密钥" />
+            <views:CredentialStatusView />
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <Button Content="更换主密码" Command="{Binding ChangeMasterPasswordCommand}" />
+              <Button Content="重置凭证" Command="{Binding ResetCredentialsCommand}" />
+            </StackPanel>
             <TextBlock Classes="section" Text="外观" />
             <TextBlock Text="主题" />
             <ComboBox AutomationProperties.Name="外观主题" ItemsSource="{Binding ThemeNames}" SelectedItem="{Binding Settings.Theme}" HorizontalAlignment="Stretch" />

@@ -8,7 +8,7 @@ namespace Cuelify.Desktop.Services;
 
 public enum TranslationProvider { Compatible, DeepSeek, Local }
 
-// 此对象仅包含可持久化的非敏感设置；Key 只属于窗口会话。
+// 此对象仅包含可持久化的非敏感设置；Key 单独通过主密码加密保存。
 public partial class AppSettings : ObservableObject
 {
     [ObservableProperty] private string ffmpegPath = "ffmpeg.exe";

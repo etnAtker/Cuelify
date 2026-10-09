@@ -10,7 +10,7 @@ Cuelify.Desktop → Cuelify.Infrastructure → Cuelify.Core
           FFmpeg / ONNX / HTTP / LLamaSharp
 ```
 
-Core 定义领域模型、接口和纯逻辑，不引用 Avalonia 或 Infrastructure。Infrastructure 实现 I/O、原生引擎和业务编排，不拥有窗口状态。Desktop 负责配置编辑、会话凭据、任务命令、页面及原生文件对话框，不另造识别或翻译流水线。
+Core 定义领域模型、接口和纯逻辑，不引用 Avalonia 或 Infrastructure。Infrastructure 实现 I/O、原生引擎和业务编排，不拥有窗口状态。Desktop 负责配置编辑、凭证解锁与会话状态、任务命令、页面及原生文件对话框，不另造识别或翻译流水线。
 
 | 模块 | 主要入口与职责 |
 | --- | --- |
@@ -23,7 +23,7 @@ Core 定义领域模型、接口和纯逻辑，不引用 Avalonia 或 Infrastruc
 | `Infrastructure/Transcription` | `TranscriptionPipeline`：识别缓存、分片并发、重试与原始 cue |
 | `Infrastructure/Translation` | 云端 transport/provider、`TranslationOrchestrator`、提示词存储 |
 | `Infrastructure/Translation/Local` | 固定模型身份、Vulkan 运行时、GPU 证据、采样与推理 |
-| `Infrastructure/Storage` | `AtomicFile`：哈希、原子 JSON/文本读写 |
+| `Infrastructure/Storage` | `AtomicFile`：哈希、原子 JSON/文本读写；`CredentialStore`：跨平台主密码加密凭证 |
 | `Desktop/Services` | `AppSettings`、`ConfigurationStore`、`DesktopJobService`、`WindowDialogs`、`UserErrorMessages` |
 | `Desktop/ViewModels` | `MainWindowViewModel`：任务所有权、导航、步骤、命令与 UI 状态 |
 | `Desktop/Views`、`Desktop/Design` | 窗口外壳、三个页面、语义 tokens、样式与共享矢量图标 |
@@ -79,7 +79,8 @@ Core 定义领域模型、接口和纯逻辑，不引用 Avalonia 或 Infrastruc
 | `_jobSettings`、`_jobInputPath` | 实际任务启动时的配置和文件，结果预览、重翻及导出依据 |
 | `Rows` / `SelectedCue` | 字幕和选择；区分等待、翻译中、失败、取消，原文和时间保持稳定 |
 | `IsBusy` / `_isMediaJob` / cancellation | 串行保护长操作，区分媒体处理与服务测试 |
-| `ElevenLabsKey` / `TranslationKey` | 仅窗口会话与启动进程环境，非 AppSettings 成员 |
+| `ElevenLabsKey` / `TranslationKey` | 解锁后的编辑字段，翻译字段按当前设置 provider 映射；非 AppSettings 成员 |
+| `CredentialStore` / `IsCredentialBusy` | 加密文件、会话派生密钥、三个服务凭证和串行凭证操作；启动默认锁定 |
 
 任务启动从已保存配置复制，再覆盖本次选项。保存设置只更新默认配置，未保存的修改不进入媒体处理请求。服务测试是设置页的显式动作，校验并使用当前设置草稿；它不改变已完成任务状态或导出资格。
 
@@ -96,6 +97,7 @@ Core 定义领域模型、接口和纯逻辑，不引用 Avalonia 或 Infrastruc
 | 路径 | 内容 |
 | --- | --- |
 | `settings.json` | 非敏感设置、三个引擎各自的提示词 |
+| `credentials.json` / `credentials.lock` | 主密码加密凭证；后者为修改时的排他文件句柄，不包含秘密 |
 | `Jobs/<job-id>/` | 输入/音频/VAD/分片/识别记录及状态 |
 | `Translations/<identity>/` | 翻译批次、结果及状态 |
 | `Working/` | 处理期间的临时输出 |
@@ -103,6 +105,18 @@ Core 定义领域模型、接口和纯逻辑，不引用 Avalonia 或 Infrastruc
 识别与翻译缓存身份分开；翻译身份包含引擎非敏感签名、模板、语言、风格和原始 cue，批次请求还包含实际上下文。API Key 不进入身份。配置拒绝高级 JSON 中受控或嵌套凭据字段，以及误贴的当前会话 Key。
 
 原子写保护完整性，作业文件句柄提供互斥；锁文件仍在不表示作业仍被占用。缓存包含音频、原文、译文，不能当作可公开测试 fixture。迁移缓存格式要考虑身份变化、旧数据校验和重新计费影响。
+
+## 主密码凭证存储
+
+`CredentialStore` 位于 Infrastructure，只使用 .NET 托管密码学及文件 API。应用数据根沿用 `ConfigurationStore.Root`，由 `Environment.SpecialFolder.LocalApplicationData` 定位；当前 Windows 路径为上述目录，不把该路径写死到凭证服务。
+
+版本 1 使用 PBKDF2-SHA256（600,000 次、16 字节随机盐、32 字节派生密钥）及 AES-256-GCM（12 字节随机 nonce、16 字节标签）。版本、算法、迭代数和盐纳入认证附加数据；文件大小、字段长度和迭代数有读取上限。每次加密使用新的 nonce，更换主密码生成新的盐。密钥和明文序列化缓冲区尽可能清零，托管字符串只在必要会话内保留，不承诺运行时字符串的物理擦除。
+
+凭证原子写入独立 JSON，临时文件只包含密文。操作用信号量及 `credentials.lock` 排他句柄串行保护；保存和改密前校验文件修订，拒绝陈旧窗口覆盖新凭证。解锁只有通过完整解密、认证及结构校验才建立会话；错误密码或篡改均不改变原文件。
+
+`MainWindowViewModel.Credentials` 负责状态与命令，主密码只在独立对话框短暂输入，退出对话框清空字段。密钥不放入任务配置快照；真实调用按任务快照 provider 获取对应会话密钥，重翻不受当前设置页引擎影响。兼容服务密钥关联规范化地址，更换地址后需确认或重填，任务仍依据已保存服务地址判定。非敏感配置保存和日志脱敏检查全部服务密钥。
+
+第一步及步骤导航校验主密码与 ElevenLabs 密钥，运行校验任务引擎所需凭证；云端测试使用设置草稿，重翻使用原任务服务。锁定不清空字幕，导出不依赖凭证。所有凭证编辑操作在业务处理期间禁用，凭证操作期间阻止启动业务；关闭取消并等待凭证操作后释放会话。没有自动锁定计时器或环境变量回退。
 
 ## 线程、取消与释放
 
@@ -112,6 +126,6 @@ Core 定义领域模型、接口和纯逻辑，不引用 Avalonia 或 Infrastruc
 
 ## 当前实现的明确限制
 
-云端地址、模型及生成参数目前由兼容接口与 DeepSeek 共用一组配置字段；提示词按三个引擎分别保存，云端会话 Key 目前也共用一个输入。工作台可选 provider，但不代表已实现多个服务配置档案或多账户凭据管理。以后扩展这些能力需要独立计划、兼容旧 JSON 并测试配置隔离，不能在交接中声称已经具备。
+云端地址、模型及生成参数目前由兼容接口与 DeepSeek 共用一组配置字段；提示词按三个引擎分别保存，密钥已分为 ElevenLabs、兼容服务和 DeepSeek 三个独立槽位，翻译页按引擎显示对应输入。工作台可选 provider，但不代表已实现多个服务配置档案或多账户凭据管理。以后扩展这些能力需要独立计划、兼容旧 JSON 并测试配置隔离，不能在交接中声称已经具备。
 
-运行日志保留最近 200 条；没有持久化密码记忆、播放器或编辑器。真实服务/GPU证据与人工验收边界见[验证状态](status.md)。
+运行日志保留最近 200 条；没有多账户管理、播放器或编辑器。真实服务/GPU证据与人工验收边界见[验证状态](status.md)。

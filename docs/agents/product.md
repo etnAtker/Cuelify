@@ -4,7 +4,7 @@
 
 ## 产品目的
 
-Cuelify 是轻量 Windows x64 字幕桌面工具：一个本地音视频文件，经 FFmpeg 音频处理、Silero VAD 分片、ElevenLabs Scribe 识别及 LLM 翻译，导出 UTF-8 译文 SRT。正式验收环境为 Windows 11 x64，主要开发环境为 Rider。
+Cuelify 的长期目标是跨平台，当前发行与正式验收仍为 Windows x64。本轮凭证层不依赖平台专用安全存储，其他平台构建与发行适配另行规划。Cuelify 是轻量字幕桌面工具：一个本地音视频文件，经 FFmpeg 音频处理、Silero VAD 分片、ElevenLabs Scribe 识别及 LLM 翻译，导出 UTF-8 译文 SRT。正式验收环境为 Windows 11 x64，主要开发环境为 Rider。
 
 ## 必须保留的功能
 
@@ -23,7 +23,7 @@ Cuelify 是轻量 Windows x64 字幕桌面工具：一个本地音视频文件�
 | 领域 | 约束 |
 | --- | --- |
 | 应用 | .NET 10 / C#、Avalonia、CommunityToolkit.Mvvm；原生桌面窗口 |
-| 平台 | Windows x64-only；核心类库的 `net10.0` 不代表跨平台交付承诺 |
+| 平台 | 当前发行与验收为 Windows x64；长期目标跨平台，其他平台适配另行规划 |
 | 媒体 | `ffmpeg.exe` / `ffprobe.exe` 经 `ICommandRunner` 和 Process 调用；不接原生 FFmpeg C API |
 | VAD | Silero ONNX + ONNX Runtime CPU；CPU 用于 VAD不等于允许 CPU-only LLM |
 | 本地翻译 | 程序进程内 LLamaSharp + Vulkan；禁用 CUDA、CPU-only 回退和自动后端回退 |
@@ -46,7 +46,9 @@ Cuelify 是轻量 Windows x64 字幕桌面工具：一个本地音视频文件�
 
 ## 凭据、取消和费用
 
-API Key 不进入普通 JSON、缓存键、日志、认证正文预览或命令行参数。当前支持密码框会话输入及进程环境变量，没有实现持久化密码记忆；将来若获准记忆凭据，必须使用 Windows 安全存储。
+API Key 不进入普通配置 JSON、缓存键、日志、认证正文预览或命令行参数。凭证通过一个主密码加密保存到独立文件，采用 PBKDF2-SHA256 与 AES-256-GCM，不依赖操作系统账户或安全存储，不读取环境变量。主密码不保存，每次启动默认锁定；未设置主密码、未解锁或缺少对应密钥时禁用流程推进。第一步需要 ElevenLabs 密钥，第二步还需所选云端翻译密钥，本地翻译不需要翻译密钥。已完成结果的查看与导出不要求解锁。
+
+ElevenLabs、兼容 API、DeepSeek 密钥隔离；兼容服务密钥关联地址，地址变化后需确认或重新填写。锁定或退出清除会话凭证；处理中禁用凭证修改、锁定与重置。更换主密码验证旧密码并原子重加密；忘记密码只能确认重置凭证，保留普通设置及缓存。损坏、不支持或不可读的文件不自动覆盖。
 
 ASR 上传音频，云端翻译发送字幕及上下文；连接测试、重试和单条重翻可能计费。以自然文案在相关操作附近说明。设置错误、缺少凭据、无法读取文件等必须先校验，不能通过反复请求掩盖配置问题。
 

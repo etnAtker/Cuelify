@@ -10,7 +10,7 @@
 | --- | --- |
 | `src/Cuelify.Core` | 媒体接口、分片规划、时间轴、cue 构建、提示词与对齐、SRT 序列化 |
 | `src/Cuelify.Infrastructure` | Process/FFmpeg、Silero、ElevenLabs、HTTP 翻译、本地 Vulkan、原子存储与业务编排 |
-| `src/Cuelify.Desktop` | Avalonia 单窗口、Fluent 资源、MVVM、会话凭据、配置与文件对话框 |
+| `src/Cuelify.Desktop` | Avalonia 单窗口、Fluent 资源、MVVM、主密码解锁与会话凭据、配置与文件对话框 |
 | `tests/Cuelify.Tests` | 纯逻辑、fake HTTP、真实 FFmpeg 集成和本地引擎参数/证据判定 |
 | `tests/Cuelify.Desktop.Tests` | 配置、命令、取消/关闭、导出和 headless XAML 测试 |
 

@@ -6,11 +6,25 @@
 
 已实现单媒体 FFmpeg/Silero/ElevenLabs 识别、三条翻译路径、提示词与上下文、独立缓存、取消/恢复、单条重翻及严格译文 SRT。桌面已改为图标导航和三步工作台，设置/日志独立，结果绑定任务配置快照；日志支持按行多选复制，第二步源语言统一驱动 ASR 与翻译。零时长识别文字按可配置容差合并或独立显示，默认 500 毫秒。源码入口见[架构](architecture.md)，冻结范围见[产品契约](product.md)。
 
-当前配置/会话实现不包含持久化密码记忆、多账户或多组云端服务配置档案。完整产品验收尚未结束，不能用“原 MVP 都完成了”跳过下面的人工项目。
+已加入主密码加密凭证、三服务密钥隔离、解锁与流程门禁；不包含多账户或多组云端服务配置档案。凭证层不依赖操作系统账户，整体跨平台发行适配尚未实施。完整产品验收尚未结束，不能用“原 MVP 都完成了”跳过下面的人工项目。
 
 维护者已指定自有代码与文档使用 [MIT 许可证](../../LICENSE)，Copyright (c) 2026 etnAtker；发行包包含项目许可证并保留第三方声明，见 D010。项目许可选择不代表所有原生间接组件的发行义务已经完成核验。
 
-## 当前代码自动化基线
+## 本轮主密码凭证验证
+
+2026-10-09，在 Windows x64 / .NET SDK 10.0.301 上实现跨平台主密码凭证层。新增 Infrastructure `CredentialStore`、桌面凭证状态与主密码弹窗；移除环境变量 Key 读取，未新增依赖或更改锁文件。
+
+执行 `dotnet build tests/Cuelify.Desktop.Tests/Cuelify.Desktop.Tests.csproj -c Release --no-restore`，零警告/零错误；执行 `dotnet test Cuelify.slnx -c Release --no-restore --logger 'trx;LogFileName=master-password-tests.trx'`，Core/Infrastructure 172 项通过。补充弹窗生命周期测试后，最终执行 `dotnet test tests/Cuelify.Desktop.Tests/Cuelify.Desktop.Tests.csproj -c Release --no-restore --logger 'trx;LogFileName=master-password-tests.trx' --blame-hang-timeout 30s`，Desktop 59 项通过，共 231 项，零失败/跳过。
+
+覆盖加密文件不含明文、目录迁移后解锁、错误密码、密文与元数据篡改、版本/参数上限、新 nonce、改密、锁定、取消/占用写入保持旧文件、陈旧窗口覆盖保护、重置保留配置和缓存；桌面覆盖首次使用、门禁与导航、服务密钥及原任务重翻隔离、地址确认、保存后按钮即时更新、锁定后导出、全服务脱敏、实际弹窗成功/错误/取消和明暗主题。
+
+测试夹具曾在 UI 线程同步等待异步保存导致挂起；已将夹具初始化移到后台，并串行执行共享 Avalonia 应用的测试，最终完整桌面运行通过。中断与诊断产物留在 Git 忽略的 TestResults，本轮成功证据以最终 TRX 为准。
+
+通过 `CUELIFY_UI_ARTIFACTS` 将 headless 截图保存到忽略目录 `artifacts/ui-credentials/`，检查浅色 1240×860、深色 900×640、锁定密钥页与三个主密码弹窗，未发现裁切。截图和业务请求使用测试替身，不是原生人工验收。没有调用 ElevenLabs、兼容 API、DeepSeek 或真实 Vulkan 模型；此前真实媒体与 GPU 证据仍列在后面的独立章节。未验证 Linux/macOS、原生 GUI、DPI 或独立发行机器。
+
+主密码限制调整：按用户要求去掉最小/最大长度校验、输入框长度上限及长度提示，不检查字符构成；保留必填与两次输入一致性校验。执行 `dotnet test Cuelify.slnx -c Release --no-restore --filter 'FullyQualifiedName~CredentialStoreTests|FullyQualifiedName~CredentialWorkflowTests' --logger 'trx;LogFileName=password-policy-tests.trx'`，凭证存储 12 项、桌面凭证流程 15 项通过，共 27 项；覆盖单字符符号密码和 2048 字符中文密码的创建、改密与解锁。未重跑无关全量测试，也未重新导出截图。
+
+## 上一轮日志、语言与零时长自动化基线
 
 日志、语言与零时长修复在 Windows x64 原生开发环境执行：
 
@@ -27,7 +41,7 @@ dotnet test Cuelify.slnx -c Release --no-restore --logger 'trx;LogFileName=log-l
 
 本轮 headless 截图保存在本机忽略目录 `artifacts/ui-log-language/`，输入和业务结果为测试替身。它们验证浅色 1240×860、深色 900×640 的绑定与布局，不证明真实 ASR、服务、Vulkan、原生剪贴板、拖放或 DPI。
 
-## 本轮真实媒体验证
+## 先前真实媒体验证（凭证改动之前）
 
 2026-10-09，使用用户指定的 7 分 21.55 秒视频，通过正式 `DesktopJobService.TranscribeAsync`、`HyMt2TranslationEngine` 与 `TranslationOrchestrator` 完成 ElevenLabs Scribe v2 → Hy-MT2 Vulkan → 严格译文 SRT。临时验证入口及证据位于 Git 忽略的 `artifacts/live-validation/`，未新增生产依赖或将凭据写入仓库。
 
@@ -70,6 +84,7 @@ dotnet test Cuelify.slnx -c Release --no-restore --logger 'trx;LogFileName=log-l
 
 | 项目 | 当前状态与最小检查 |
 | --- | --- |
+| 主密码原生与跨平台验收 | 待做：原生弹窗、键盘、系统关闭与文件权限；Linux/macOS 构建发行适配及凭证文件互通尚未验证 |
 | 新三步 UI 的原生人工验收 | 待做：文件对话框、单文件拖放、键盘 Tab/焦点、切页、步骤、取消/重试/导出及关闭 |
 | DPI 与长中文 | 待做：Windows 100%/150%/200%，最小窗口与长路径/长字幕，不仅检查 headless 截图 |
 | 独立无 SDK 机器 | 待做：完整 self-contained 目录启动，确认自带运行时、native 资产和资源正常 |

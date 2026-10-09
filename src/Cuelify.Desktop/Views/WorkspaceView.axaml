@@ -11,7 +11,18 @@
       <TextBlock Grid.Column="3" Text="›" Classes="muted" VerticalAlignment="Center" Margin="12,0" />
       <Button Grid.Column="4" Classes="step" Classes.current="{Binding IsResultsStep}" Content="3　生成字幕" Command="{Binding ResultsStepCommand}" HorizontalAlignment="Stretch" />
     </Grid>
-    <TextBlock Grid.Row="2" Classes="error" Text="{Binding Error}" Margin="0,0,0,12" />
+    <StackPanel Grid.Row="2" Spacing="8" Margin="0,0,0,12">
+      <TextBlock Classes="error" Text="{Binding Error}" TextWrapping="Wrap" />
+      <StackPanel Spacing="8" IsVisible="{Binding HasTaskCredentialHint}">
+        <TextBlock Classes="muted" Text="{Binding TaskCredentialHint}" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite" />
+        <StackPanel Orientation="Horizontal" Spacing="8">
+          <Button Content="{Binding CredentialActionText}" Command="{Binding ManageMasterPasswordCommand}" IsVisible="{Binding NeedsMasterPassword}" />
+          <Button Content="配置语音识别密钥" Command="{Binding ConfigureSpeechCommand}" IsVisible="{Binding NeedsSpeechKey}" />
+          <Button Content="配置翻译密钥" Command="{Binding ConfigureTranslationCommand}" IsVisible="{Binding NeedsTranslationKey}" />
+        </StackPanel>
+        <TextBlock Classes="muted" Text="{Binding CredentialStatus}" TextWrapping="Wrap" />
+      </StackPanel>
+    </StackPanel>
     <ScrollViewer Grid.Row="3" IsVisible="{Binding IsFileStep}" HorizontalScrollBarVisibility="Disabled">
       <StackPanel MaxWidth="680" HorizontalAlignment="Stretch" Spacing="20" Margin="0,24">
         <Border Classes="surface" BorderBrush="{DynamicResource Brush.Divider}" BorderThickness="1" Padding="32">
@@ -95,7 +106,7 @@
         <Button Content="取消" Command="{Binding CancelCommand}" IsVisible="{Binding IsBusy}" />
         <Button x:Name="NextButton" Content="下一步" Command="{Binding NextStepCommand}" IsVisible="{Binding IsFileStep}" Classes="accent" />
         <Button x:Name="RunButton" Content="{Binding RunButtonText}" Command="{Binding RunCommand}" IsVisible="{Binding IsOptionsStep}" Classes="accent" />
-        <Button Content="继续处理" Command="{Binding RunCommand}" IsVisible="{Binding CanResume}" />
+        <Button Content="继续处理" Command="{Binding RunCommand}" IsVisible="{Binding ShowResume}" />
         <Button x:Name="ExportButton" Content="导出 SRT…" Command="{Binding ExportCommand}" IsVisible="{Binding IsResultsStep}" Classes="accent" />
       </StackPanel>
     </Grid>

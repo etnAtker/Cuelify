@@ -17,6 +17,7 @@ using Cuelify.Infrastructure.Translation;
 using Xunit;
 
 [assembly: AvaloniaTestApplication(typeof(Cuelify.Desktop.Tests.TestAppBuilder))]
+[assembly: CollectionBehavior(DisableTestParallelization = true)]
 
 namespace Cuelify.Desktop.Tests;
 
@@ -169,16 +170,18 @@ public sealed class DesktopTests
     [AvaloniaTheory]
     [InlineData(true, 0)]
     [InlineData(false, 1)]
-    public async Task MissingCredentialOpensRelevantSettingsAndReturnsToOptions(bool missingSpeech, int section)
+    public async Task MissingCredentialDisablesRunAndConfigurationPreservesOptions(bool missingSpeech, int section)
     {
         using var fixture = new Fixture(); await using var model = fixture.Model();
         model.InputPath = "fixture.mp4"; await model.NextStepCommand.ExecuteAsync(null);
-        model.TaskProviderIndex = 0;
+        model.TaskProviderIndex = 0; model.ProviderIndex = 0;
         if (missingSpeech) model.ElevenLabsKey = ""; else model.TranslationKey = "";
         await model.RunCommand.ExecuteAsync(null);
+        Assert.False(model.RunCommand.CanExecute(null)); Assert.False(model.IsSettings);
+        Assert.Equal(0, fixture.Jobs.Transcriptions); Assert.Contains("API 密钥", model.TaskCredentialHint);
+        if (missingSpeech) model.ConfigureSpeechCommand.Execute(null); else model.ConfigureTranslationCommand.Execute(null);
         Assert.True(model.IsSettings); Assert.Equal(section, model.SettingsSectionIndex);
         if (!missingSpeech) Assert.Equal(0, model.ProviderIndex);
-        Assert.Equal(0, fixture.Jobs.Transcriptions); Assert.Contains("API 密钥", model.Error);
         model.ShowWorkspaceCommand.Execute(null); Assert.True(model.IsOptionsStep);
     }
 
@@ -553,17 +556,36 @@ internal sealed class Fixture : IDisposable
     public FakeJobs Jobs { get; } = new();
     public FakeDialogs Dialogs { get; } = new();
     public Fixture() { Directory.CreateDirectory(Root); Store = new(Root); }
-    public MainWindowViewModel Model() => new(Jobs, Store, Dialogs) { ElevenLabsKey = "fake-eleven", TranslationKey = "fake-translation" };
+    public MainWindowViewModel Model()
+    {
+        var credentials = new CredentialStore(Root);
+        // 测试夹具同步建立凭证时放到后台，避免文件 I/O 续体等待已被阻塞的 UI 上下文。
+        Task.Run(async () =>
+        {
+            if (credentials.HasMasterPassword) await credentials.UnlockAsync("test-master-password");
+            else await credentials.CreateAsync("test-master-password");
+            await credentials.SaveAsync(new("fake-eleven", "fake-translation", "fake-translation", "https://api.deepseek.com"));
+        }).GetAwaiter().GetResult();
+        return new(Jobs, Store, Dialogs, credentials);
+    }
     public void Dispose() => Directory.Delete(Root, true);
 }
 internal sealed class FakeDialogs : IWindowDialogs
 {
+    public string Password { get; set; } = "test-master-password";
+    public string NewPassword { get; set; } = "test-new-master-password";
+    public bool AcceptPassword { get; set; } = true;
+    public async Task<bool> PasswordAsync(PasswordPurpose purpose, Func<string, string, Task> submit, CancellationToken token = default)
+    {
+        if (!AcceptPassword) return false;
+        await submit(Password, purpose == PasswordPurpose.Change ? NewPassword : Password); return true;
+    }
     public string? CopiedText { get; private set; }
     public Task CopyTextAsync(string text) { CopiedText = text; return Task.CompletedTask; }
     public bool Confirm { get; set; } = true;
     public string? SavePath { get; set; }
     public string? SuggestedName { get; private set; }
-    public Task<bool> ConfirmAsync(string message) => Task.FromResult(Confirm);
+    public Task<bool> ConfirmAsync(string message, CancellationToken token = default) => Task.FromResult(Confirm);
     public Task<string?> OpenAsync(string title, string[] patterns) => Task.FromResult<string?>(null);
     public Task<string?> SaveSrtAsync(string suggestedName) { SuggestedName = suggestedName; return Task.FromResult(SavePath); }
 }
@@ -582,6 +604,7 @@ internal sealed class FakeJobs : IDesktopJobService
     public Exception? EngineFailure;
     public Exception? TranslationFailure;
     public string? FailureReason;
+    public string? TranslationCredential;
     public AppSettings? LastSettings;
     public AppSettings? RecognitionSettings;
     public AppSettings? PreviewSettings;
@@ -597,7 +620,7 @@ internal sealed class FakeJobs : IDesktopJobService
     }
     public async Task<TranslationResult> TranslateAsync(IReadOnlyList<SubtitleCue> cues, AppSettings settings, string key, IReadOnlySet<string>? force, IProgress<TranslationProgress> progress, CancellationToken token)
     {
-        LastSettings = settings; Forced = force;
+        LastSettings = settings; Forced = force; TranslationCredential = key;
         if (BlockTranslation)
         {
             if (ReportCompletedBatch) progress.Report(new("Translating", [cues[1].Id]) { Cues = cues.Select((cue, index) => cue with { TranslatedText = index == 0 ? "首批译文" : null }).ToArray() });
