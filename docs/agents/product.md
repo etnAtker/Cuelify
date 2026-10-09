@@ -12,9 +12,9 @@ Cuelify 的长期目标是跨平台，当前发行与正式验收仍为 Windows 
 - VAD 辅助选择合理切点；支持上传大小限制、片段重叠、词级时码转换及边界去重。
 - ElevenLabs Scribe ASR，可自动识别或指定语言；支持成功分片缓存、失败分片重试及取消。
 - 三条翻译路径：OpenAI-compatible Chat Completions、DeepSeek 官方 API、本地 LLamaSharp + Vulkan。
-- 按引擎保存可编辑提示词，提供预设、变量说明、恢复默认和最终请求正文预览。
+- 云端按引擎保存可编辑提示词，本地按模型分别保存；1.8B 默认简单单条模板，7B 默认前后文模板。提供预设、变量说明、针对当前引擎/模型的恢复默认和最终请求正文预览。
 - 云端服务支持地址、模型名、可选生成参数、超时、批次、并发、重试与校验后的附加 JSON。参数支持情况取决于提供商，不能假设所有兼容接口接受同一思考开关。
-- 本地仅支持官方 `Hy-MT2-1.8B-Q4_K_M.gguf`，文件名与 SHA-256 都必须校验；身份信息见根目录 [README](../../README.md#本地模型)。
+- 内嵌模型预置官方 Hy-MT2-1.8B Q6_K、Hy-MT2-7B Q4_K_M，兼容旧 Hy-MT2-1.8B Q4_K_M 配置。下载和默认路径在配置文件同级目录；下载动态读取官方当前文件信息与可用校验值，不固定远端版本、文件名、大小或 SHA-256。来源见根目录 [README](../../README.md#本地模型)。
 - 显示真实阶段、原译文对照、日志和可执行的错误建议；支持继续处理、单条重翻和完整译文导出。
 - 工作台、设置、日志独立；工作台按选择文件、翻译选项、生成字幕三步推进，详见 [UI 规约](ui-guidelines.md)。
 
@@ -28,7 +28,7 @@ Cuelify 的长期目标是跨平台，当前发行与正式验收仍为 Windows 
 | VAD | Silero ONNX + ONNX Runtime CPU；CPU 用于 VAD不等于允许 CPU-only LLM |
 | 本地翻译 | 程序进程内 LLamaSharp + Vulkan；禁用 CUDA、CPU-only 回退和自动后端回退 |
 | 持久化 | JSON 配置与缓存、原子写入；不引入数据库或通用插件架构 |
-| 发行 | `win-x64` self-contained 目录；Silero 随包，FFmpeg 与 GGUF 由用户准备 |
+| 发行 | `win-x64` self-contained 目录；Silero 随包，FFmpeg 由用户准备，GGUF 在应用中下载或由用户选择 |
 
 不采用 Electron、WebView 界面、独立 Web 服务或外部 LLM 进程。Ollama、LM Studio、llama-server、llama-cli 不能作为正式实现或本地验收路径。
 
@@ -56,7 +56,7 @@ ASR 上传音频，云端翻译发送字幕及上下文；连接测试、重试�
 
 ## 本期范围外
 
-不添加多文件队列、在线视频下载、内置播放器、波形或时间轴编辑、完整字幕编辑器、TTS/配音、烧录、VTT/ASS、额外 ASR 提供商、术语或角色管理界面、AI 校对、任务云同步、后台守护进程、自动模型下载或任意 GGUF 管理。不适配 7B、其他模型/量化、Linux、macOS、ARM64、CUDA 或 CPU-only 本地推理。
+不添加多文件队列、在线视频下载、内置播放器、波形或时间轴编辑、完整字幕编辑器、TTS/配音、烧录、VTT/ASS、额外 ASR 提供商、术语或角色管理界面、AI 校对、任务云同步、后台守护进程、无用户操作的自动模型下载或任意 GGUF 管理。内嵌模型范围限于上述预设及旧配置兼容；Linux、macOS、ARM64、CUDA 或 CPU-only 本地推理不在当前适配范围。
 
 ## 完成与验收
 

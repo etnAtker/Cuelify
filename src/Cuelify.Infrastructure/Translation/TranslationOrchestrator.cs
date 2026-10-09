@@ -23,7 +23,7 @@ public sealed class TranslationOrchestrator(ITranslationEngine engine, string? c
         cues = cues.Select(cue => cue with { TranslatedText = null }).ToArray();
         if (profile.OutputFormat != engine.OutputFormat) throw new ArgumentException("提示词输出协议与引擎不一致。");
         if (engine.OutputFormat == TranslationOutputFormat.PlainText && (settings.BatchSize != 1 || settings.Concurrency != 1))
-            throw new ArgumentException("Hy-MT2 必须使用批次 1、并发 1。");
+            throw new ArgumentException("内嵌模型需要逐条翻译。");
         _ = SrtSerializer.SerializeSource(cues); // 付费前校验输入 ID、顺序及时间戳。
         var indices = cues.Select((cue, index) => (cue.Id, index)).ToDictionary(item => item.Id, item => item.index, StringComparer.Ordinal);
         if (forceCueIds?.Any(id => !indices.ContainsKey(id)) == true) throw new ArgumentException("定向重翻包含未知 cue ID。");
@@ -89,7 +89,9 @@ public sealed class TranslationOrchestrator(ITranslationEngine engine, string? c
 
         IReadOnlyList<SubtitleCue> Context(SubtitleCue cue, IReadOnlyList<SubtitleCue> snapshot) =>
             snapshot.Take(indices[cue.Id]).TakeLast(settings.ContextCues).ToArray();
-        string RequestPath(TranslationRequest request) => Path.Combine(directory, "batch-" + AtomicFile.Hash(request) + ".json");
+        IReadOnlyList<SubtitleCue> Following(IReadOnlyList<SubtitleCue> batch, IReadOnlyList<SubtitleCue> snapshot) =>
+            snapshot.Skip(indices[batch[^1].Id] + 1).Take(settings.FollowingContextCues).Select(cue => cue with { TranslatedText = null }).ToArray();
+        string RequestPath(TranslationRequest request) => Path.Combine(directory, "batch-" + AtomicFile.Hash(new { request.Cues, request.Messages }) + ".json");
         bool Forced(string id) => forceCueIds?.Contains(id) == true;
 
         async Task ProcessAndReport(IReadOnlyList<SubtitleCue> batch, IReadOnlyList<SubtitleCue> snapshot)
@@ -109,7 +111,7 @@ public sealed class TranslationOrchestrator(ITranslationEngine engine, string? c
         {
             if (forceCueIds is not null) batch = batch.Where(cue => Forced(cue.Id)).ToArray();
             if (batch.Count == 0) return;
-            var request = builder.Build(profile, settings, batch, Context(batch[0], snapshot));
+            var request = builder.Build(profile, settings, batch, Context(batch[0], snapshot), Following(batch, snapshot));
             var path = RequestPath(request);
             var accepted = await ReadCache(path, batch);
             foreach (var cue in batch.Where(cue => Forced(cue.Id))) accepted.Remove(cue.Id);
@@ -161,7 +163,7 @@ public sealed class TranslationOrchestrator(ITranslationEngine engine, string? c
 
         async Task TranslateOne(SubtitleCue cue, IReadOnlyList<SubtitleCue> snapshot, int attempts)
         {
-            var request = builder.Build(profile, settings, [cue], Context(cue, snapshot));
+            var request = builder.Build(profile, settings, [cue], Context(cue, snapshot), Following([cue], snapshot));
             var path = RequestPath(request);
             if (!Forced(cue.Id))
             {

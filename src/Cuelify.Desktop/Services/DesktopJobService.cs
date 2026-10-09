@@ -19,6 +19,8 @@ public interface IDesktopJobService : IAsyncDisposable
     Task<TranslationResult> TranslateAsync(IReadOnlyList<SubtitleCue> cues, AppSettings settings, string key, IReadOnlySet<string>? force, IProgress<TranslationProgress> progress, CancellationToken token);
     Task<string> TestEngineAsync(AppSettings settings, string key, CancellationToken token);
     string Preview(IReadOnlyList<SubtitleCue> cues, AppSettings settings);
+    Task<string> PreviewAsync(IReadOnlyList<SubtitleCue> cues, AppSettings settings, CancellationToken token) => Task.FromResult(Preview(cues, settings));
+    ValueTask ReleaseEmbeddedModelAsync() => ValueTask.CompletedTask;
 }
 
 public sealed class DesktopJobService(string? root = null) : IDesktopJobService
@@ -26,7 +28,7 @@ public sealed class DesktopJobService(string? root = null) : IDesktopJobService
     public string EngineDiagnostic { get; private set; } = "";
     private readonly string _root = root ?? new ConfigurationStore().Root;
     private readonly HttpClient _http = new() { Timeout = Timeout.InfiniteTimeSpan };
-    private HyMt2TranslationEngine? _local;
+    private EmbeddedTranslationEngine? _local;
     private string? _localIdentity;
     private IAudioProcessor Audio(AppSettings settings) => new FfmpegAudioProcessor(new ProcessCommandRunner(), settings.FfmpegPath, settings.FfprobePath);
     public Task<MediaInfo> ProbeAsync(string input, AppSettings settings, CancellationToken token) => Audio(settings).ProbeAsync(input, token);
@@ -52,22 +54,25 @@ public sealed class DesktopJobService(string? root = null) : IDesktopJobService
 
     public Task<TranslationResult> TranslateAsync(IReadOnlyList<SubtitleCue> cues, AppSettings settings, string key, IReadOnlySet<string>? force, IProgress<TranslationProgress> progress, CancellationToken token) => Task.Run(async () =>
     {
-        var engine = await EngineAsync(settings, key);
+        var engine = await EngineAsync(settings, key, token);
         var result = await new TranslationOrchestrator(engine, Path.Combine(_root, "Translations")).TranslateAsync(cues, settings.GetProfile(), settings.TranslationSettings(), force, progress, token);
         return result;
     }, token);
 
-    private async Task<ITranslationEngine> EngineAsync(AppSettings settings, string key)
+    private async Task<ITranslationEngine> EngineAsync(AppSettings settings, string key, CancellationToken token)
     {
         if (settings.Provider != TranslationProvider.Local)
             return settings.Provider == TranslationProvider.DeepSeek
                 ? new DeepSeekOfficialProvider(_http, () => key, settings.CloudOptions(), settings.ThinkingOptions())
                 : new OpenAiCompatibleTranslationEngine(_http, () => key, settings.CloudOptions());
-        var identity = AtomicFile.Hash(settings.LocalOptions());
+        var options = settings.LocalOptions();
+        var hash = await EmbeddedModelOptions.VerifyIdentityAsync(options.ModelPath, token, options.ExpectedSha256);
+        options = options with { ExpectedSha256 = hash };
+        var identity = AtomicFile.Hash(options);
         if (_localIdentity != identity)
         {
             if (_local is not null) await _local.DisposeAsync();
-            _local = new(settings.LocalOptions());
+            _local = new(options);
             _localIdentity = identity;
         }
         return _local!;
@@ -78,11 +83,11 @@ public sealed class DesktopJobService(string? root = null) : IDesktopJobService
         EngineDiagnostic = "";
         var cue = new SubtitleCue("connection-test", TimeSpan.Zero, TimeSpan.FromSeconds(1), "Hello.", null);
         var request = new PromptBuilder().Build(settings.GetProfile(), settings.TranslationSettings(), [cue], []);
-        var engine = await EngineAsync(settings, key);
+        var engine = await EngineAsync(settings, key, token);
         var response = await engine.TranslateAsync(request, token);
         var aligned = AlignmentValidator.Parse(response.Content, [cue], engine.OutputFormat, false);
         if (aligned.FailedIds.Count > 0) throw new InvalidDataException("服务已响应，但译文不完整或格式不正确。请检查提示词后重试。");
-        if (engine is HyMt2TranslationEngine local)
+        if (engine is EmbeddedTranslationEngine local)
         {
             EngineDiagnostic = $"Vulkan：{string.Join("; ", local.Evidence?.DeviceLines ?? [])}；GPU 卸载 {local.Evidence?.OffloadedLayers}/{local.Evidence?.TotalLayers} 层。";
             return "本地翻译测试成功";
@@ -93,10 +98,27 @@ public sealed class DesktopJobService(string? root = null) : IDesktopJobService
     public string Preview(IReadOnlyList<SubtitleCue> cues, AppSettings settings)
     {
         var batch = cues.Take(settings.TranslationSettings().BatchSize).ToArray();
-        var request = new PromptBuilder().Build(settings.GetProfile(), settings.TranslationSettings(), batch, []);
+        var request = new PromptBuilder().Build(settings.GetProfile(), settings.TranslationSettings(), batch, [], cues.Skip(batch.Length).ToArray());
         var value = settings.Provider == TranslationProvider.Local ? (object)request.Messages
             : CloudRequestBuilder.Build(settings.CloudOptions(), request.Messages, settings.Provider == TranslationProvider.DeepSeek ? settings.ThinkingOptions() : null);
         return JsonSerializer.Serialize(value, new JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
+    }
+    public async Task<string> PreviewAsync(IReadOnlyList<SubtitleCue> cues, AppSettings settings, CancellationToken token)
+    {
+        if (settings.Provider != TranslationProvider.Local) return Preview(cues, settings);
+        return await Task.Run(async () =>
+        {
+            var source = cues.Take(1).Select(cue => cue with { TranslatedText = null }).ToArray();
+            var request = new PromptBuilder().Build(settings.GetProfile(), settings.TranslationSettings(), source, [], cues.Skip(1).ToArray());
+            var engine = (EmbeddedTranslationEngine)await EngineAsync(settings, "", token);
+            var prepared = await engine.PrepareAsync(request, token);
+            return JsonSerializer.Serialize(prepared, new JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
+        }, token);
+    }
+    public async ValueTask ReleaseEmbeddedModelAsync()
+    {
+        if (_local is not null) await _local.DisposeAsync();
+        _local = null; _localIdentity = null;
     }
     public async ValueTask DisposeAsync()
     {

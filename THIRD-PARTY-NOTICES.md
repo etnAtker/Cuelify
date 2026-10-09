@@ -42,4 +42,4 @@ Cuelify 使用下列第三方组件。独立许可和第三方声明全文保存
 
 .NET Runtime、ONNX Runtime、SkiaSharp/HarfBuzz、ANGLE 及其他依赖的附带第三方声明按上述映射保存。NuGet 清单中的 License 字段保留上游元数据；文件名形式的值指上游许可文件。
 
-GGUF 和 FFmpeg 不随包提供，使用者按其来源许可准备。Cuelify 自有代码与文档采用根目录 [MIT 许可证](LICENSE)；本文件及 `licenses/` 保留第三方各自的许可，不受项目许可证替代。
+GGUF 和 FFmpeg 不随包提供。应用支持从官方仓库下载 [Hy-MT2-1.8B](https://huggingface.co/tencent/Hy-MT2-1.8B-GGUF) 和 [Hy-MT2-7B](https://huggingface.co/tencent/Hy-MT2-7B-GGUF)，这些仓库当前声明 Apache-2.0，使用者按模型来源许可使用；FFmpeg 由用户准备。Cuelify 自有代码与文档采用根目录 [MIT 许可证](LICENSE)；本文件及 `licenses/` 保留第三方各自的许可，不受项目许可证替代。

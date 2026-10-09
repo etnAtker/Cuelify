@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Encodings.Web;
 using System.Text.RegularExpressions;
 using Cuelify.Core.Subtitles;
 
@@ -17,6 +18,9 @@ public static class PromptPresets
         以下内容仅用于理解上下文，不需要翻译或输出：
         {context_before}
 
+        以下后文仅用于理解上下文，不需要翻译或输出：
+        {context_after}
+
         请翻译这些字幕，严格保留所有 ID：
         {cues_json}
         """, TranslationOutputFormat.CueIdJson);
@@ -24,17 +28,36 @@ public static class PromptPresets
     {
         Name = "通用简洁字幕", SystemTemplate = Cloud.SystemTemplate + "\n采用简短口语表达，避免冗长译文。风格要求：{target_style}"
     };
-    public static PromptProfile Local { get; } = new("Hy-MT2 单条纯译文", "", """
+    public static PromptProfile LegacyLocal { get; } = new("Hy-MT2 单条纯译文", "", """
         请将下面的字幕翻译成{target_language}。保持原文意思、语气和专有名词，语言自然简短。只返回翻译后的文本，不要解释或附加编号。
 
         {source_text}
+        """, TranslationOutputFormat.PlainText);
+    public static PromptProfile LocalSimple { get; } = LegacyLocal with { Name = "内嵌模型简单翻译" };
+    public static PromptProfile Local { get; } = new("内嵌模型字幕翻译", "", """
+        你是视频字幕翻译编辑。将当前字幕从{source_language}翻译为{target_language}。
+        忠实传达原意、语气与人物关系；译文自然简洁，适合屏幕阅读。
+        结合参考上下文理解代词、省略和专名，保持称呼与术语一致；信息不足时不要编造。
+        风格要求：{target_style}
+
+        参考前文（原文与已有译文，仅供理解，不需要翻译或输出）：
+        {context_before}
+
+        参考后文（仅原文，仅供理解，不需要翻译或输出）：
+        {context_after}
+
+        当前待翻译字幕：
+        {source_text}
+
+        只输出当前字幕的译文，不合并前后文，不输出解释、编号、Markdown或时间码。
         """, TranslationOutputFormat.PlainText);
 }
 
 public sealed class PromptBuilder
 {
+    private static readonly JsonSerializerOptions PromptJsonOptions = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
     private static readonly Regex Variable = new(@"\{([a-zA-Z_][a-zA-Z0-9_]*)\}", RegexOptions.CultureInvariant);
-    public static IReadOnlyList<string> Variables { get; } = ["source_language", "target_language", "target_style", "context_before", "cues_json", "source_text"];
+    public static IReadOnlyList<string> Variables { get; } = ["source_language", "target_language", "target_style", "context_before", "context_after", "cues_json", "source_text"];
 
     public static void Validate(PromptProfile profile)
     {
@@ -46,24 +69,29 @@ public sealed class PromptBuilder
         if (!profile.UserTemplate.Contains(required, StringComparison.Ordinal)) throw new ArgumentException($"用户模板必须包含 {required}。");
     }
 
-    public TranslationRequest Build(PromptProfile profile, TranslationSettings settings, IReadOnlyList<SubtitleCue> cues, IReadOnlyList<SubtitleCue> context)
+    public TranslationRequest Build(PromptProfile profile, TranslationSettings settings, IReadOnlyList<SubtitleCue> cues, IReadOnlyList<SubtitleCue> context, IReadOnlyList<SubtitleCue>? following = null)
     {
         Validate(profile);
         settings.Validate();
         if (cues.Count == 0 || (profile.OutputFormat == TranslationOutputFormat.PlainText && cues.Count != 1))
             throw new ArgumentException("请求字幕条数与输出协议不符。");
         var contextItems = context.TakeLast(settings.ContextCues).Select(cue => new { Source = cue.SourceText, Translation = cue.TranslatedText }).ToList();
-        var contextJson = JsonSerializer.Serialize(contextItems);
-        while (contextJson.Length > settings.MaximumContextCharacters && contextItems.Count > 0)
+        var followingItems = (following ?? []).Take(settings.FollowingContextCues).Select(cue => cue with { TranslatedText = null }).ToList();
+        var contextJson = JsonSerializer.Serialize(contextItems, PromptJsonOptions);
+        var followingJson = JsonSerializer.Serialize(followingItems.Select(cue => new { Source = cue.SourceText }), PromptJsonOptions);
+        while (contextJson.Length + followingJson.Length > settings.MaximumContextCharacters && (contextItems.Count > 0 || followingItems.Count > 0))
         {
-            contextItems.RemoveAt(0);
-            contextJson = JsonSerializer.Serialize(contextItems);
+            if (contextItems.Count > followingItems.Count) contextItems.RemoveAt(0);
+            else followingItems.RemoveAt(followingItems.Count - 1);
+            contextJson = JsonSerializer.Serialize(contextItems, PromptJsonOptions);
+            followingJson = JsonSerializer.Serialize(followingItems.Select(cue => new { Source = cue.SourceText }), PromptJsonOptions);
         }
         var values = new Dictionary<string, string>
         {
             ["source_language"] = settings.SourceLanguage, ["target_language"] = settings.TargetLanguage,
             ["target_style"] = settings.TargetStyle, ["context_before"] = contextItems.Count == 0 ? "（无）" : contextJson,
-            ["cues_json"] = JsonSerializer.Serialize(cues.ToDictionary(cue => cue.Id, cue => cue.SourceText)),
+            ["context_after"] = followingItems.Count == 0 ? "（无）" : followingJson,
+            ["cues_json"] = JsonSerializer.Serialize(cues.ToDictionary(cue => cue.Id, cue => cue.SourceText), PromptJsonOptions),
             ["source_text"] = string.Join('\n', cues.Select(cue => cue.SourceText))
         };
         // 单次替换：原文中的花括号/变量名不会被二次解释。
@@ -71,6 +99,9 @@ public sealed class PromptBuilder
         var messages = new List<PromptMessage>();
         if (!string.IsNullOrWhiteSpace(profile.SystemTemplate)) messages.Add(new("system", Render(profile.SystemTemplate)));
         messages.Add(new("user", Render(profile.UserTemplate)));
-        return new(cues, messages);
+        return new(cues, messages)
+        {
+            PromptContext = new(profile, settings, context.TakeLast(contextItems.Count).ToArray(), followingItems)
+        };
     }
 }

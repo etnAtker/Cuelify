@@ -65,7 +65,7 @@ internal static class UserErrorMessages
     private static string Local(string category) => category switch
     {
         "GpuMemory" => "显存不足，请关闭占用显卡的程序，或降低 GPU 卸载层数和上下文长度。",
-        "ModelIdentity" or "ModelArchitecture" => "模型文件不符合要求，请重新选择官方 Hy-MT2-1.8B-Q4_K_M.gguf 文件。",
+        "ModelIdentity" or "ModelArchitecture" => "模型文件不完整或与所选模型不符，请重新下载或选择对应模型文件。",
         "NativeLibrary" => "本地翻译组件加载失败，请重新解压完整的程序包。",
         "VulkanOffload" => "无法使用显卡运行模型，请检查 Vulkan 支持和显卡驱动。",
         "WindowsX64Required" => "本地翻译需要 Windows x64 系统。",

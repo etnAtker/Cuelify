@@ -1,6 +1,6 @@
 # 验证状态与后续开发入口
 
-基线日期：2026-10-09。这里区分历史真实联调、当前代码自动化和未完成的发行/人工验收；不能把全部项目笼统标为完成。本文件是后续 Agent 的交接入口，更新时记录实际证据及适用版本，不只修改测试总数。
+基线日期：2026-10-10。这里区分历史真实联调、当前代码自动化和未完成的发行/人工验收；不能把全部项目笼统标为完成。本文件是后续 Agent 的交接入口，更新时记录实际证据及适用版本，不只修改测试总数。
 
 ## 当前实现
 
@@ -9,6 +9,28 @@
 已加入主密码加密凭证、三服务密钥隔离、解锁与流程门禁；不包含多账户或多组云端服务配置档案。凭证层不依赖操作系统账户，整体跨平台发行适配尚未实施。完整产品验收尚未结束，不能用“原 MVP 都完成了”跳过下面的人工项目。
 
 维护者已指定自有代码与文档使用 [MIT 许可证](../../LICENSE)，Copyright (c) 2026 etnAtker；发行包包含项目许可证并保留第三方声明，见 D010。项目许可选择不代表所有原生间接组件的发行义务已经完成核验。
+
+## 本轮各模型独立提示词验证
+
+2026-10-10，按 D015 将本地模板改为按模型分别保存。1.8B 默认恢复原简单单条模板，7B 默认保留前后文模板；提示词页可切换模型，各自编辑、应用预设和恢复默认。旧共用自定义模板只迁移到原选中模型，旧内置模板使用模型默认值，已开始任务的预览/重翻继续使用原快照。依赖、批次与并发保持原行为。
+
+执行 `dotnet test Cuelify.slnx -c Release --no-restore --filter 'FullyQualifiedName~EmbeddedModelPromptTests|FullyQualifiedName~EmbeddedModelWorkflowTests|FullyQualifiedName~TranslationPromptTests|FullyQualifiedName~SwitchingProvidersRetainsIndependentPromptEdits|FullyQualifiedName~Configuration' --logger 'trx;LogFileName=model-prompts-targeted.trx'`，19 项 Core/Infrastructure 与 19 项 Desktop 通过，编译未报告警告或错误。随后执行 `dotnet test Cuelify.slnx -c Release --no-build --no-restore --logger 'trx;LogFileName=model-prompts-full.trx'`，Core/Infrastructure 189 项、Desktop 76 项通过，共 265 项，零失败/跳过。覆盖默认值、配置迁移、独立修改/恢复/重启、云端隔离、原任务快照、无上下文的实际请求，以及浅色 1240×860、深色 900×640 的真实 XAML 模型选择与预设。
+
+使用 Codex 私有目录中已有的 1.8B Q6_K 测试模型，按新的默认模板进行 1 次实际推理：输入提示词 41 token，译文「今天是美好的一天。」，正常 EOS，RTX 5080 Vulkan 卸载 33/33 层，上下文与权重释放通过。证据在忽略目录 `artifacts/model-prompt-validation/`。未重新下载模型，未修改用户正在使用的普通配置/模型目录；7B 默认内容未变，本轮未重复其实际推理。没有新增云端服务调用。
+
+Headless 截图在 `artifacts/ui-model-prompts/`，检查了两个模型及明暗主题；这些界面证据使用测试夹具，不代表原生 GUI/DPI 验收。需注意 Codex Windows 应用包会重定向测试进程的 AppData 写入：之前测试模型实际在 `%LOCALAPPDATA%\Packages\<Codex应用包>\LocalCache\Local\Cuelify\`，早期日志中的普通配置路径是逻辑路径，不代表用户资源管理器中同名目录的实际文件。
+
+## 上一轮内嵌模型下载与上下文验证
+
+2026-10-09，翻译引擎入口改为「内嵌模型推理」，最终预置 Hy-MT2-1.8B Q6_K 与 Hy-MT2-7B Q4_K_M，兼容旧 1.8B Q4_K_M 配置。按用户最终要求仅保留这两个预置模型，其余候选模型的目录、专用推理分支与文档选项已移除。依赖保持 LLamaSharp/Vulkan Windows 0.27.0，未修改包版本或锁文件。
+
+下载时动态发现官方文件、修订、大小和可用 SHA-256；不冻结远端文件身份。模型下载及默认路径与 `settings.json` 同级，下载使用临时文件、校验后替换，支持取消与续传。每个模型保留自己的路径和实际文件哈希；保存新选择不改变已完成任务快照。统一字幕模板使用前文原译文和后文原文，按实际 token 预算裁剪较远参考，保留当前字幕与翻译指令；本地预览使用同一套渲染与预算。
+
+最终执行 `dotnet build Cuelify.slnx -c Release --no-restore`，零警告/零错误；执行 `dotnet test Cuelify.slnx -c Release --no-build --no-restore --logger 'trx;LogFileName=embedded-models-final.trx'`，Core/Infrastructure 188 项、Desktop 69 项通过，共 257 项，零失败/跳过。覆盖动态文件改名与更新、续传及服务器忽略 Range、坏文件保护旧模型、取消保留片段、HTTP 错误、旧配置与自定义模板迁移、模型切换和原任务隔离、下载期间的导航/锁定/关闭、上下文及 token 裁剪、缓存复跑和字幕对齐。HTTP 下载与桌面业务夹具是模拟结果。
+
+两个 Hy-MT2 模型均通过生产 `ModelDownloadService` 从官方仓库实际下载到开发机配置目录并完成当次大小/哈希校验。通过生产 `EmbeddedTranslationEngine` 和 `TranslationOrchestrator` 在 RTX 5080 上分别实际生成 5 次、推理中取消 1 次，再验证 3 条字幕缓存命中（0 次新推理）及单条重翻。两模型均实际 Vulkan 卸载 33/33 层，成功生成正常 EOS，取消后恢复、上下文释放、权重释放及严格 SRT 的 ID/数量/顺序/时码保持通过。测试使用短英语上下文样本，不代表长片或所有语言的语义质量验收。
+
+实际 GPU/下载证据与临时验证入口位于忽略目录 `artifacts/model-validation/`、`artifacts/model-inference/`；最终 headless 截图在 `artifacts/ui-embedded-models/`，已检查浅色 1240×860、深色 900×640。界面测试确认新配置只显示两个预置选项及下载进度，截图使用模拟下载。未新增 ElevenLabs、兼容 API 或 DeepSeek 调用，未进行原生 GUI、DPI、独立发行机器或跨平台验收。
 
 ## 提示词变量 UI 验证
 

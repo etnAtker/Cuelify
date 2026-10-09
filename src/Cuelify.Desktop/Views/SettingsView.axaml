@@ -80,8 +80,15 @@
               </StackPanel>
             </StackPanel>
             <StackPanel Spacing="8" IsVisible="{Binding IsLocal}">
-              <TextBlock Classes="muted" Text="使用官方 Hy-MT2-1.8B-Q4_K_M.gguf 模型，需要支持 Vulkan 的显卡。" />
+              <TextBlock Text="内嵌模型" />
+              <ComboBox x:Name="EmbeddedModelSelector" ItemsSource="{Binding EmbeddedModels}" SelectedItem="{Binding SelectedEmbeddedModel}" HorizontalAlignment="Stretch" AutomationProperties.Name="内嵌模型" />
+              <TextBlock Classes="muted" Text="需要支持 Vulkan 的显卡。模型越大，所需显存和下载空间通常越多。" />
+              <Button x:Name="DownloadModelButton" Content="下载模型" Command="{Binding DownloadModelCommand}" />
               <Button Content="选择模型文件…" Command="{Binding ChooseModelCommand}" />
+              <TextBlock Classes="muted" Text="下载的模型存放在配置文件所在文件夹，可取消并继续下载。" />
+              <TextBlock Classes="muted" Text="{Binding ModelFileStatus}" />
+              <ProgressBar x:Name="ModelDownloadProgress" IsVisible="{Binding IsModelDownloading}" IsIndeterminate="{Binding ModelDownloadIndeterminate}" Value="{Binding ModelDownloadPercent}" Minimum="0" Maximum="100" />
+              <TextBlock Classes="muted" Text="{Binding ModelDownloadStatus}" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite" />
               <TextBlock Text="模型文件路径" />
               <TextBox Text="{Binding Settings.ModelPath}" AutomationProperties.Name="模型文件路径" />
               <TextBlock Text="GPU 卸载层数" />
@@ -105,6 +112,8 @@
                 <NumericUpDown Value="{Binding Settings.MaximumAttempts}" Minimum="1" Maximum="5" AutomationProperties.Name="最多请求次数（含首次请求）" />
                 <TextBlock Text="参考前文条数" />
                 <NumericUpDown Value="{Binding Settings.ContextCues}" Minimum="0" Maximum="8" AutomationProperties.Name="参考前文条数" />
+                <TextBlock Text="参考后文条数" />
+                <NumericUpDown Value="{Binding Settings.FollowingContextCues}" Minimum="0" Maximum="8" AutomationProperties.Name="参考后文条数" />
                 <TextBlock Text="上下文字符上限" />
                 <NumericUpDown Value="{Binding Settings.MaximumContextCharacters}" Minimum="0" Maximum="20000" AutomationProperties.Name="上下文字符上限" />
                 <StackPanel IsVisible="{Binding IsCloud}" Spacing="8">
@@ -148,8 +157,13 @@
           <StackPanel Classes="settings-form" Spacing="10" IsEnabled="{Binding CanConfigure}">
             <TextBlock Text="翻译引擎" />
             <ComboBox ItemsSource="{Binding ProviderNames}" SelectedIndex="{Binding ProviderIndex}" HorizontalAlignment="Stretch" AutomationProperties.Name="提示词所属引擎" />
-                <TextBlock Classes="muted" Text="每个翻译引擎分别保存提示词。保存后用于新的处理。" />
-                <ComboBox ItemsSource="{Binding AvailablePresets}" SelectedItem="{Binding PresetSelection}" AutomationProperties.Name="提示词预设" PlaceholderText="选择预设" />
+                <TextBlock Classes="muted" Text="每个翻译引擎分别保存提示词。保存后用于新的处理。" IsVisible="{Binding IsCloud}" />
+                <StackPanel Spacing="8" IsVisible="{Binding IsLocal}">
+                  <TextBlock Text="内嵌模型" />
+                  <ComboBox x:Name="PromptModelSelector" ItemsSource="{Binding EmbeddedModels}" SelectedItem="{Binding SelectedEmbeddedModel}" HorizontalAlignment="Stretch" AutomationProperties.Name="提示词所属模型" />
+                  <TextBlock Classes="muted" Text="每个模型分别保存提示词。恢复默认只调整当前模型，保存后用于新的处理。" TextWrapping="Wrap" />
+                </StackPanel>
+                <ComboBox x:Name="PromptPresetSelector" ItemsSource="{Binding AvailablePresets}" SelectedItem="{Binding PresetSelection}" AutomationProperties.Name="提示词预设" PlaceholderText="选择预设" />
                 <StackPanel Orientation="Horizontal" Spacing="8">
                   <Button Content="恢复默认" Command="{Binding ResetPromptCommand}" />
                   <Button Content="简洁字幕预设" Command="{Binding ResetPromptCommand}" CommandParameter="通用简洁字幕" IsVisible="{Binding IsCloud}" />

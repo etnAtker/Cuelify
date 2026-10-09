@@ -270,7 +270,7 @@ public sealed class DesktopTests
         await fixture.Store.SaveAsync(settings, ["secret-eleven", "secret-ds"]);
         var loaded = await fixture.Store.LoadAsync();
         Assert.Equal("日文", loaded!.TargetLanguage);
-        Assert.Equal("我的本地模板", loaded.LocalProfile.Name);
+        Assert.Equal("我的本地模板", loaded.GetLocalProfile().Name);
         var text = await File.ReadAllTextAsync(Path.Combine(fixture.Root, "settings.json"));
         Assert.DoesNotContain("secret-eleven", text); Assert.DoesNotContain("secret-ds", text);
         Assert.DoesNotContain("ApiKey", text); Assert.DoesNotContain("TranslationKey", text);
@@ -556,7 +556,7 @@ internal sealed class Fixture : IDisposable
     public FakeJobs Jobs { get; } = new();
     public FakeDialogs Dialogs { get; } = new();
     public Fixture() { Directory.CreateDirectory(Root); Store = new(Root); }
-    public MainWindowViewModel Model()
+    public MainWindowViewModel Model(Cuelify.Infrastructure.Translation.Local.IModelDownloadService? downloads = null)
     {
         var credentials = new CredentialStore(Root);
         // 测试夹具同步建立凭证时放到后台，避免文件 I/O 续体等待已被阻塞的 UI 上下文。
@@ -566,7 +566,7 @@ internal sealed class Fixture : IDisposable
             else await credentials.CreateAsync("test-master-password");
             await credentials.SaveAsync(new("fake-eleven", "fake-translation", "fake-translation", "https://api.deepseek.com"));
         }).GetAwaiter().GetResult();
-        return new(Jobs, Store, Dialogs, credentials);
+        return new(Jobs, Store, Dialogs, credentials, downloads);
     }
     public void Dispose() => Directory.Delete(Root, true);
 }

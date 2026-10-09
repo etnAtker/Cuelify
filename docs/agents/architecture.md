@@ -22,7 +22,7 @@ Core 定义领域模型、接口和纯逻辑，不引用 Avalonia 或 Infrastruc
 | `Infrastructure/Speech` | Silero ONNX、ElevenLabs 客户端和词响应解析 |
 | `Infrastructure/Transcription` | `TranscriptionPipeline`：识别缓存、分片并发、重试与原始 cue |
 | `Infrastructure/Translation` | 云端 transport/provider、`TranslationOrchestrator`、提示词存储 |
-| `Infrastructure/Translation/Local` | 固定模型身份、Vulkan 运行时、GPU 证据、采样与推理 |
+| `Infrastructure/Translation/Local` | 预置模型目录、动态官方下载与校验、Vulkan 运行时、GPU 证据、采样与推理 |
 | `Infrastructure/Storage` | `AtomicFile`：哈希、原子 JSON/文本读写；`CredentialStore`：跨平台主密码加密凭证 |
 | `Desktop/Services` | `AppSettings`、`ConfigurationStore`、`DesktopJobService`、`WindowDialogs`、`UserErrorMessages` |
 | `Desktop/ViewModels` | `MainWindowViewModel`：任务所有权、导航、步骤、命令与 UI 状态 |
@@ -60,7 +60,8 @@ Core 定义领域模型、接口和纯逻辑，不引用 Avalonia 或 Infrastruc
 - 兼容 API 与 DeepSeek 官方适配器复用 `ChatCompletionsTransport`，但请求能力映射分别处理。普通请求为非流式，只接收最终 `content`；思考文本不进入字幕。
 - `PromptBuilder` 使用有限变量白名单，一次替换并正确处理 JSON；不执行模板表达式，也不再解释原文中的大括号。预设和输出格式位于 Core 的生产类型，不另写一套 UI 专用规则。
 - 云端批次受条数与字符预算限制。固定波次并发，前文取该波次开始时的稳定快照，避免完成顺序改变上下文和缓存身份。
-- 本地强制批次 1、并发 1、纯译文输出。`HyMt2TranslationEngine` 复用已加载权重，使用 GGUF chat template 和独立上下文，核查实际 tokenizer 预算、EOS、超时与取消。
+- 内嵌模型强制批次 1、并发 1、纯译文输出。`EmbeddedTranslationEngine` 复用已加载权重，使用 GGUF chat template 和独立上下文，核查实际 tokenizer 预算、EOS、超时与取消。按模型目录校验架构和量化，两个 Hy-MT2 模型共用原有采样参数。GPU offload 与模型缓冲证据只取本次权重加载的日志，设备信息复用当前 Vulkan 初始化记录。
+- `PromptBuilder` 统一渲染前文（原文及已有译文）、后文（仅原文）与当前字幕，JSON 保留可读中文；默认前文 5 条、后文 2 条，共享字符预算。`TranslationRequest.PromptContext` 保留模板与参考条目，`EmbeddedPromptBudget` 用实际 tokenizer 逐条移除较远参考内容，不截断当前字幕或指令；参考全部移除仍超限时明确报错。内嵌请求预览经同一裁剪和 chat template 返回实际提示词及 token 数。
 - 成功译文校验后持久化，每批结束发布 `TranslationProgress` 中的有效 cue 和失败 ID。桌面合并交错通知，不让晚到快照清掉已显示的成功译文。
 - 定向重翻失效选中 ID 的旧缓存，恢复未选中结果；重翻失败或取消不能把该 ID 的旧成功译文重新当作本次结果。
 
@@ -77,12 +78,16 @@ Core 定义领域模型、接口和纯逻辑，不引用 Avalonia 或 Infrastruc
 | `_savedSettings` | 最后成功保存的非敏感配置快照 |
 | `TaskSourceLanguage`、`TaskTargetLanguage`、`TaskProviderIndex` | 工作台本次任务选项，默认值来自已保存设置；源语言同时映射识别代码与翻译名称 |
 | `_jobSettings`、`_jobInputPath` | 实际任务启动时的配置和文件，结果预览、重翻及导出依据 |
+| `EmbeddedModelId`、`ModelFiles`、`ModelPath`、`ModelSha256` | 选中模型、各模型的路径/已校验内容哈希、当前路径及哈希；保存后进入任务快照 |
+| `EmbeddedModelProfiles` | 各本地模型独立的已编辑提示词；未编辑时按模型默认模板取值，保存后进入任务快照 |
 | `Rows` / `SelectedCue` | 字幕和选择；区分等待、翻译中、失败、取消，原文和时间保持稳定 |
 | `IsBusy` / `_isMediaJob` / cancellation | 串行保护长操作，区分媒体处理与服务测试 |
 | `ElevenLabsKey` / `TranslationKey` | 解锁后的编辑字段，翻译字段按当前设置 provider 映射；非 AppSettings 成员 |
 | `CredentialStore` / `IsCredentialBusy` | 加密文件、会话派生密钥、三个服务凭证和串行凭证操作；启动默认锁定 |
 
 任务启动从已保存配置复制，再覆盖本次选项。保存设置只更新默认配置，未保存的修改不进入媒体处理请求。服务测试是设置页的显式动作，校验并使用当前设置草稿；它不改变已完成任务状态或导出资格。
+
+`EmbeddedModel.DefaultProfile` 定义默认模板：1.8B（含旧 Q4_K_M）使用 `PromptPresets.LocalSimple`，7B 使用带前后文的 `PromptPresets.Local`。`EmbeddedModelProfiles` 按模型 ID 保存修改，未编辑的模型使用默认值；切换模型先捕获当前编辑，再加载目标模板。旧 `LocalProfile` 仅用于迁移，保存后不再输出：旧内置模板采用所选模型默认值，自定义模板仅迁移到原选中模型。所有已保存本地模板均验证纯译文协议，任务快照深拷贝字典。
 
 `SpeechLanguages` 维护 Scribe v2 官方语言名称与 ISO 639-1/639-3 映射。界面只显示中文源语言名称，区域标识兼容输入会转为语言代码；旧 JSON 加载时以原 ASR 代码统一源语言，并保留已有合法两位/三位代码维持识别缓存身份。未选定源语言时省略 `language_code`。未知语言在上传前拒绝。
 
@@ -101,10 +106,16 @@ Core 定义领域模型、接口和纯逻辑，不引用 Avalonia 或 Infrastruc
 | `Jobs/<job-id>/` | 输入/音频/VAD/分片/识别记录及状态 |
 | `Translations/<identity>/` | 翻译批次、结果及状态 |
 | `Working/` | 处理期间的临时输出 |
+| `<model-id>.gguf` | 内嵌模型默认文件；与配置文件同级，远端文件名变化不改变本地默认路径 |
+| `<model-id>.gguf.partial` / `.partial.json` / `.download.lock` | 下载片段、本次官方元数据和下载排他句柄；取消保留可续传片段 |
 
 识别与翻译缓存身份分开；翻译身份包含引擎非敏感签名、模板、语言、风格和原始 cue，批次请求还包含实际上下文。API Key 不进入身份。配置拒绝高级 JSON 中受控或嵌套凭据字段，以及误贴的当前会话 Key。
 
 原子写保护完整性，作业文件句柄提供互斥；锁文件仍在不表示作业仍被占用。缓存包含音频、原文、译文，不能当作可公开测试 fixture。迁移缓存格式要考虑身份变化、旧数据校验和重新计费影响。
+
+`ModelDownloadService` 从官方 API 动态发现指定量化的唯一 GGUF，不冻结远端版本、文件名、大小或哈希。续传只复用同一资产的片段，校验 Range；服务器忽略 Range 时重写片段。哈希与大小采用本次官方提供的信息，完整文件以原子移动替换，旧正式文件在下载失败时保留。手动选择文件动态核对官方当前资产；已保存模型使用已记录内容哈希离线校验，文件名不参与身份。
+
+`ConfigurationStore` 根据自身 Root 生成默认路径。旧非空本地路径映射到兼容 Hy-MT2-1.8B Q4_K_M；旧默认提示词升级，自定义提示词保留。模型切换恢复各自路径和哈希；模型内容哈希、模型 ID、采样及推理配置进入翻译缓存身份。下载不自动保存其他设置，下载前释放闲置权重，处理中禁止下载或改变模型；关闭等待 HTTP 和推理结束再释放资源。
 
 ## 主密码凭证存储
 

@@ -29,10 +29,24 @@ public sealed class TranslationPromptTests
         var local = new PromptBuilder().Build(PromptPresets.Local, new(), [Cue()], [Cue("old", "Previous") with { TranslatedText = "上文" }]);
         Assert.Single(local.Messages);
         Assert.Equal("user", local.Messages[0].Role);
+        Assert.Contains("Previous", local.Messages[0].Content);
+        Assert.Contains("上文", local.Messages[0].Content);
         var cloud = new PromptBuilder().Build(PromptPresets.Cloud, new(), [Cue()], [Cue("old", "Previous") with { TranslatedText = "上文" }]);
         Assert.Contains("Previous", cloud.Messages[^1].Content);
         var output = AlignmentValidator.Parse("{\"old\":\"多余\",\"cue-1\":\"你好\"}", [Cue()], TranslationOutputFormat.CueIdJson);
         Assert.Empty(output.Translations);
+    }
+
+    [Fact]
+    public void SimpleLocalPresetRendersOnlyCurrentSubtitleWithoutContext()
+    {
+        var request = new PromptBuilder().Build(PromptPresets.LocalSimple, new(), [Cue(text: "Current")],
+            [Cue("before", "Before") with { TranslatedText = "上文译文" }], [Cue("after", "After")]);
+        Assert.Single(request.Messages); Assert.Equal("user", request.Messages[0].Role);
+        Assert.Contains("Current", request.Messages[0].Content); Assert.Contains("翻译成中文", request.Messages[0].Content);
+        Assert.DoesNotContain("Before", request.Messages[0].Content); Assert.DoesNotContain("After", request.Messages[0].Content);
+        Assert.DoesNotContain("上文译文", request.Messages[0].Content);
+        Assert.Equal(PromptPresets.LegacyLocal.UserTemplate, PromptPresets.LocalSimple.UserTemplate);
     }
 
     [Theory]
@@ -102,8 +116,9 @@ public sealed class TranslationPromptTests
     [Fact]
     public async Task LocalOptionsCannotEnableCpuOnlyOrArbitraryModel()
     {
-        Assert.Throws<ArgumentException>(() => new HyMt2TranslationEngine(new() { GpuLayers = 0 }));
-        Assert.Throws<ArgumentException>(() => new HyMt2TranslationEngine(new() { MaximumTokens = 4096 }));
-        await Assert.ThrowsAsync<InvalidDataException>(() => HyMt2ModelOptions.VerifyIdentityAsync("other.gguf", CancellationToken.None));
+        Assert.Throws<ArgumentException>(() => new EmbeddedTranslationEngine(new() { GpuLayers = 0 }));
+        Assert.Throws<ArgumentException>(() => new EmbeddedTranslationEngine(new() { MaximumTokens = 4096 }));
+        Assert.Throws<ArgumentException>(() => new EmbeddedTranslationEngine(new() { ModelId = "unknown" }));
+        await Assert.ThrowsAsync<FileNotFoundException>(() => EmbeddedModelOptions.VerifyIdentityAsync("other.gguf", CancellationToken.None));
     }
 }

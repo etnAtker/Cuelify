@@ -43,7 +43,7 @@ pwsh -File scripts/Verify-Release.ps1
 
 检查脚本要求 PowerShell 7，是开发工具，桌面用户无需安装。它核对必要资产、Silero 哈希、Windows x64 原生目录、包内 .NET 运行时与正常启动/退出；不调用服务，不等同于无 SDK 机器或 GPU 生成验收。
 
-发布目录包含 Silero ONNX、.NET 自包含运行时、ONNX CPU、Vulkan/Skia/ANGLE 原生库、README、项目 MIT `LICENSE`、开发/排障文档和第三方许可。FFmpeg 与 GGUF 由用户准备。`Directory.Build.targets` 过滤 NuGet 原生内容，只保留 win-x64。缺少 Silero 则发布明确失败。
+发布目录包含 Silero ONNX、.NET 自包含运行时、ONNX CPU、Vulkan/Skia/ANGLE 原生库、README、项目 MIT `LICENSE`、开发/排障文档和第三方许可。FFmpeg 由用户准备，GGUF 在应用中下载或由用户选择，不随包分发。`Directory.Build.targets` 过滤 NuGet 原生内容，只保留 win-x64。缺少 Silero 则发布明确失败。
 
 项目自有代码与文档采用 [MIT](../LICENSE)。`licenses/packages.json` 记录依赖来源、版权和许可文本映射；版本变更时同步核对相应许可及第三方声明，保持全文完整。原生间接组件的许可选择与源码获取说明按实际发行构建核对，不能只以主库 MIT 判定整个发行包的义务。
 
@@ -55,7 +55,7 @@ pwsh -File scripts/Verify-Release.ps1
 1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3
 ```
 
-GGUF 不纳入版本控制，唯一文件和哈希见 [README](../README.md#本地模型)。可放在忽略的 `assets/models/`，也可在窗口选择其他目录下的该官方文件。程序不提供自动下载。
+GGUF 不纳入版本控制，预置模型与官方来源见 [README](../README.md#本地模型)。应用下载与默认路径直接位于配置文件同级目录，使用稳定模型 ID 作为本地文件名；用户也可选择其他目录下的官方模型。`ModelDownloadService` 动态查询官方仓库当前量化文件、修订、大小和可用哈希，远端文件名及哈希不固化在代码中。一次下载使用本次查询的修订保持内容一致；下次操作重新查询，不将旧修订作为全局固定版本。
 
 ## 真实验证
 

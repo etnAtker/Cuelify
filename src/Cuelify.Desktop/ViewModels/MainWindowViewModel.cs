@@ -79,7 +79,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     public SelectionModel<string> LogSelection { get; } = new() { SingleSelect = false };
     public bool CanCopyLogs => LogSelection.Count > 0;
     public bool HasLogs => Log.Count > 0;
-    public string[] ProviderNames { get; } = ["OpenAI 兼容服务", "DeepSeek", "本地 Hy-MT2"];
+    public string[] ProviderNames { get; } = ["OpenAI 兼容服务", "DeepSeek", "内嵌模型推理"];
     public string[] SourceLanguageNames => SpeechLanguages.Names;
     public string DefaultSourceLanguage
     {
@@ -98,10 +98,10 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     public string RunButtonText => CanContinue ? "继续处理" : "开始处理";
     public string TestEngineButtonText => IsLocal ? "测试本地翻译" : "测试连接";
     public string EngineTestHint => IsLocal ? "使用所选模型试译一句短句。" : "测试会发送一句短句，可能产生费用。";
-    public string SystemPromptHint => IsLocal ? "本地模型通常无需系统提示词。" : "设置翻译要求、语气和输出格式。";
+    public string SystemPromptHint => IsLocal ? "默认翻译要求已包含在用户模板中，可按需补充。" : "设置翻译要求、语气和输出格式。";
     public string TopPHint => IsDeepSeek ? "仅在思考模式下使用，范围为 0.95～1。" : "留空使用服务默认值。";
     public bool CanEditTopP => !IsDeepSeek || Settings.ThinkingEnabled;
-    public string[] PresetNames { get; } = ["通用字幕批量翻译", "通用简洁字幕", "Hy-MT2 单条纯译文"];
+    public string[] PresetNames { get; } = ["通用字幕批量翻译", "通用简洁字幕", "内嵌模型简单翻译", "内嵌模型字幕翻译"];
     public int ProviderIndex { get => (int)Settings.Provider; set { if (value < 0 || value == (int)Settings.Provider) return; CaptureProfile(); Settings.Provider = (TranslationProvider)value; } }
     public bool IsLocal => Settings.Provider == TranslationProvider.Local;
     public bool IsCloud => !IsLocal;
@@ -110,7 +110,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     public bool CanEditSampling => !IsDeepSeek || !Settings.ThinkingEnabled;
     public bool CanRun => CanConfigure && !string.IsNullOrWhiteSpace(InputPath) && string.IsNullOrEmpty(RunCredentialHint);
     public bool CanExport => !IsBusy && _isComplete && Rows.Count > 0 && Rows.All(row => row.Cue.TranslatedText is not null);
-    public string[] AvailablePresets => IsLocal ? [PromptPresets.Local.Name] : [PromptPresets.Cloud.Name, PromptPresets.Concise.Name];
+    public string[] AvailablePresets => IsLocal ? [PromptPresets.LocalSimple.Name, PromptPresets.Local.Name] : [PromptPresets.Cloud.Name, PromptPresets.Concise.Name];
     public bool CanRetryCue => CanConfigure && SelectedCue is not null && _jobSettings is not null && string.IsNullOrEmpty(TranslationCredentialHint(_jobSettings.Provider, _jobSettings.BaseUrl));
     public bool CanPreview => !IsBusy && Rows.Count > 0;
     public bool HasRows => Rows.Count > 0;
@@ -130,14 +130,15 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     public bool CanResume => CanContinue && IsResultsStep && CanRun;
     public bool CanStartNew => CanConfigure && IsResultsStep && _jobSettings is not null;
     public string FileName => string.IsNullOrWhiteSpace(InputPath) ? "尚未选择文件" : Path.GetFileName(InputPath);
-    public string TaskPromptSummary => (TaskProviderIndex == (int)TranslationProvider.Local ? _savedSettings.LocalProfile :
+    public string TaskPromptSummary => (TaskProviderIndex == (int)TranslationProvider.Local ? _savedSettings.GetLocalProfile() :
         TaskProviderIndex == (int)TranslationProvider.DeepSeek ? _savedSettings.DeepSeekProfile : _savedSettings.CompatibleProfile).Name;
-    public string TaskServiceSummary => TaskProviderIndex == (int)TranslationProvider.Local ? "本地 Hy-MT2" : $"{ProviderNames[Math.Clamp(TaskProviderIndex, 0, 2)]} · {_savedSettings.CloudModel}";
+    public string TaskServiceSummary => TaskProviderIndex == (int)TranslationProvider.Local ? $"内嵌模型推理 · {EmbeddedModelCatalog.Get(_savedSettings.LocalOptions().ModelId).Name}" : $"{ProviderNames[Math.Clamp(TaskProviderIndex, 0, 2)]} · {_savedSettings.CloudModel}";
     public string SettingsHint => IsBusy ? "任务正在进行，相关设置暂时无法修改。" : HasUnsavedSettings ? "有未保存的修改。保存后用于新的处理。" : "已保存的设置用于新的处理。";
 
-    public MainWindowViewModel(IDesktopJobService jobs, ConfigurationStore store, IWindowDialogs dialogs, CredentialStore? credentials = null)
+    public MainWindowViewModel(IDesktopJobService jobs, ConfigurationStore store, IWindowDialogs dialogs, CredentialStore? credentials = null, IModelDownloadService? downloads = null)
     {
         _jobs = jobs; _store = store; _dialogs = dialogs; _credentials = credentials ?? new CredentialStore(store.Root);
+        Settings = store.CreateDefaults(); InitializeModelDownloads(downloads);
         LoadCredentials();
         Settings.PropertyChanged += SettingsChanged;
         LogSelection.Source = Log;
@@ -159,8 +160,9 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     }
     private void SettingsChanged(object? sender, PropertyChangedEventArgs args)
     {
+        ModelSettingsChanged(args);
         if (args.PropertyName == nameof(AppSettings.SourceLanguage) || _loadingSettings) OnPropertyChanged(nameof(DefaultSourceLanguage));
-        if (args.PropertyName == nameof(AppSettings.Provider))
+        if (args.PropertyName == nameof(AppSettings.Provider) || args.PropertyName == nameof(AppSettings.EmbeddedModelId) && IsLocal)
         {
             LoadProfile(); OnPropertyChanged(nameof(AvailablePresets)); OnPropertyChanged(nameof(ProviderIndex)); OnPropertyChanged(nameof(IsLocal)); OnPropertyChanged(nameof(IsCloud)); OnPropertyChanged(nameof(IsDeepSeek)); OnPropertyChanged(nameof(IsCompatible));
         }
@@ -177,7 +179,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         OnPropertyChanged(nameof(TestEngineButtonText)); OnPropertyChanged(nameof(EngineTestHint)); OnPropertyChanged(nameof(SystemPromptHint)); OnPropertyChanged(nameof(TopPHint));
     }
     private void LoadProfile()
-    { var profile = Settings.GetProfile(); ProfileName = profile.Name; SystemTemplate = profile.SystemTemplate; UserTemplate = profile.UserTemplate; }
+    { var profile = Settings.GetProfile(); ProfileName = profile.Name; SystemTemplate = profile.SystemTemplate; UserTemplate = profile.UserTemplate; PresetSelection = null; }
     private void CaptureProfile() => Settings.SetProfile(new(ProfileName, SystemTemplate, UserTemplate, IsLocal ? TranslationOutputFormat.PlainText : TranslationOutputFormat.CueIdJson));
     partial void OnInputPathChanged(string value)
     { Rows.Clear(); SelectedCue = null; _isComplete = false; _jobSettings = null; CanContinue = false; Step = WorkflowStep.File; Error = ""; Status = "待开始"; MediaSummary = ""; OnPropertyChanged(nameof(FileName)); OnPropertyChanged(nameof(ResultSummary)); OnPropertyChanged(nameof(HasRows)); RefreshCommands(); }
@@ -199,6 +201,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         OnPropertyChanged(nameof(CanRun)); OnPropertyChanged(nameof(CanExport)); OnPropertyChanged(nameof(CanConfigure)); OnPropertyChanged(nameof(CanRetryCue)); OnPropertyChanged(nameof(CanPreview));
         RunCommand.NotifyCanExecuteChanged(); RetryCueCommand.NotifyCanExecuteChanged(); ExportCommand.NotifyCanExecuteChanged(); PreviewRequestCommand.NotifyCanExecuteChanged();
         ChooseMediaCommand.NotifyCanExecuteChanged(); ChooseModelCommand.NotifyCanExecuteChanged(); SaveSettingsCommand.NotifyCanExecuteChanged(); TestEngineCommand.NotifyCanExecuteChanged(); ResetPromptCommand.NotifyCanExecuteChanged();
+        DownloadModelCommand.NotifyCanExecuteChanged();
         CopyPromptVariableCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(CanAcceptDrop)); OnPropertyChanged(nameof(CanGoToOptions)); OnPropertyChanged(nameof(CanGoToResults)); OnPropertyChanged(nameof(CanStartNew));
         OnPropertyChanged(nameof(CanResume));
@@ -271,7 +274,11 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     [RelayCommand(CanExecute = nameof(CanConfigure))]
     private async Task ChooseModelAsync()
     {
-        try { var file = await _dialogs.OpenAsync("选择 Hy-MT2 模型", ["*.gguf"]); if (file is not null) Settings.ModelPath = file; }
+        try
+        {
+            var file = await _dialogs.OpenAsync("选择模型文件", ["*.gguf"]);
+            if (file is not null) await VerifySelectedModelAsync(file);
+        }
         catch (Exception exception) { ReportError(exception); }
     }
     [RelayCommand(CanExecute = nameof(CanConfigure))]
@@ -283,7 +290,10 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     [RelayCommand(CanExecute = nameof(CanConfigure))]
     private void ResetPrompt(string? name)
     {
-        Settings.SetProfile(IsLocal ? PromptPresets.Local : name == PromptPresets.Concise.Name ? PromptPresets.Concise : PromptPresets.Cloud);
+        var profile = IsLocal ? name == PromptPresets.LocalSimple.Name ? PromptPresets.LocalSimple :
+            name == PromptPresets.Local.Name ? PromptPresets.Local : SelectedEmbeddedModel.DefaultProfile :
+            name == PromptPresets.Concise.Name ? PromptPresets.Concise : PromptPresets.Cloud;
+        Settings.SetProfile(profile);
         LoadProfile();
     }
     [RelayCommand(CanExecute = nameof(CanRun))]
@@ -293,7 +303,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         var snapshot = TaskSettings(); ConfigurationStore.Validate(snapshot);
         if (string.IsNullOrWhiteSpace(ElevenLabsKey)) throw new ServiceCredentialException("ElevenLabs");
         if (snapshot.Provider != TranslationProvider.Local && string.IsNullOrWhiteSpace(KeyFor(snapshot.Provider))) throw new ServiceCredentialException("翻译服务");
-        if (snapshot.Provider == TranslationProvider.Local) await HyMt2ModelOptions.VerifyIdentityAsync(snapshot.ModelPath, token);
+        if (snapshot.Provider == TranslationProvider.Local) await Task.Run(() => EmbeddedModelOptions.VerifyIdentityAsync(snapshot.ModelPath, token, snapshot.ModelSha256), token);
         var media = await _jobs.ProbeAsync(InputPath, snapshot, token);
         MediaSummary = $"时长 {media.Duration:hh\\:mm\\:ss}";
         _jobSettings = snapshot; _jobInputPath = InputPath; _isComplete = false; Step = WorkflowStep.Results;
@@ -357,11 +367,10 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         if (!string.IsNullOrWhiteSpace(_jobs.EngineDiagnostic)) AddLog(_jobs.EngineDiagnostic);
     });
     [RelayCommand(CanExecute = nameof(CanPreview))]
-    private void PreviewRequest()
+    private Task PreviewRequestAsync() => ExecuteAsync(async token =>
     {
-        try { Preview = _jobs.Preview(Rows.Select(row => row.Cue).ToArray(), _jobSettings!); }
-        catch (Exception exception) { ReportError(exception); }
-    }
+        Preview = await _jobs.PreviewAsync(Rows.Select(row => row.Cue).ToArray(), _jobSettings!, token);
+    }, probing: true);
     [RelayCommand(CanExecute = nameof(CanExport))]
     private async Task ExportAsync()
     {
@@ -394,13 +403,13 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         catch (OperationCanceledException) when (token.IsCancellationRequested)
         {
             if (mediaJob) { CanContinue = _hasStartedProcessing; MarkUnfinishedRows(CueTranslationState.Cancelled); }
-            else if (!probing) EngineStatus = "测试已取消";
+            else if (!probing && !IsModelDownloading) EngineStatus = "测试已取消";
             if (mediaJob) Status = "已取消"; AddLog("已取消");
         }
         catch (Exception exception)
         {
             if (mediaJob) { CanContinue = exception is TranscriptionFailedException || (_hasStartedProcessing && exception is TimeoutException or HttpRequestException); MarkUnfinishedRows(CueTranslationState.Failed); }
-            else if (!probing) EngineStatus = "测试失败";
+            else if (!probing && !IsModelDownloading) EngineStatus = "测试失败";
             if (mediaJob) Status = "处理未完成"; ReportError(exception);
             if (mediaJob && exception is ServiceCredentialException credential)
             { configureAfter = credential.Service == "ElevenLabs" ? ConfigureSpeech : ConfigureTranslation; }
@@ -449,6 +458,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         if (_operation is not null) await _operation;
         if (_credentialOperation is not null) await _credentialOperation;
         await _jobs.DisposeAsync(); _credentials.Dispose(); LoadCredentials(); _credentialCancellation.Dispose();
+        _modelHttp?.Dispose();
         Settings.PropertyChanged -= SettingsChanged;
     }
 }

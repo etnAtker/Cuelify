@@ -3,17 +3,27 @@ using Cuelify.Core.Translation;
 using Cuelify.Infrastructure.Storage;
 using Cuelify.Infrastructure.Speech;
 using Cuelify.Infrastructure.Translation;
+using Cuelify.Infrastructure.Translation.Local;
 
 namespace Cuelify.Desktop.Services;
 
 public sealed class ConfigurationStore(string? root = null)
 {
     public string Root { get; } = root ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Cuelify");
+    public string DefaultModelPath(EmbeddedModel model) => Path.Combine(Path.GetFullPath(Root), model.DefaultFileName);
+    public AppSettings CreateDefaults() => new() { EmbeddedModelId = EmbeddedModelCatalog.Default.Id, ModelPath = DefaultModelPath(EmbeddedModelCatalog.Default) };
     public async Task<AppSettings?> LoadAsync(CancellationToken token = default)
     {
         var settings = await AtomicFile.ReadJsonAsync<AppSettings>(Path.Combine(Root, "settings.json"), token);
         if (settings is not null)
         {
+            if (string.IsNullOrWhiteSpace(settings.EmbeddedModelId))
+                settings.EmbeddedModelId = string.IsNullOrWhiteSpace(settings.ModelPath) ? EmbeddedModelCatalog.Default.Id : EmbeddedModelCatalog.Legacy.Id;
+            var model = EmbeddedModelCatalog.Get(settings.EmbeddedModelId);
+            if (string.IsNullOrWhiteSpace(settings.ModelPath)) settings.ModelPath = DefaultModelPath(model);
+            settings.ModelFiles ??= new(StringComparer.Ordinal);
+            settings.ModelFiles[model.Id] = new(settings.ModelPath, settings.ModelSha256);
+            settings.MigrateLocalProfiles();
             // 旧版识别代码优先：这是原任务实际发送给 ASR 的语言。
             var source = SpeechLanguages.Resolve(string.IsNullOrWhiteSpace(settings.SourceCode) ? settings.SourceLanguage : settings.SourceCode);
             settings.SourceLanguage = source?.Name ?? "自动识别";
@@ -24,6 +34,7 @@ public sealed class ConfigurationStore(string? root = null)
     public Task SaveAsync(AppSettings settings, IEnumerable<string> secrets, CancellationToken token = default)
     {
         Validate(settings);
+        settings.ModelFiles[settings.LocalOptions().ModelId] = new(settings.ModelPath, settings.ModelSha256);
         var json = JsonSerializer.Serialize(settings);
         if (secrets.Where(key => !string.IsNullOrWhiteSpace(key)).Any(key => json.Contains(key, StringComparison.Ordinal) || json.Contains(JsonSerializer.Serialize(key).Trim('"'), StringComparison.Ordinal)))
             throw new ArgumentException("设置或提示词中包含 API 密钥，无法保存。请移除其中的密钥，并将密钥填写在专用输入框中。");
@@ -32,6 +43,7 @@ public sealed class ConfigurationStore(string? root = null)
     public static AppSettings Snapshot(AppSettings settings) => JsonSerializer.Deserialize<AppSettings>(JsonSerializer.Serialize(settings))!;
     public static void Validate(AppSettings settings)
     {
+        settings.MigrateLocalProfiles();
         var source = SpeechLanguages.Resolve(settings.SourceLanguage);
         settings.SourceCode = SpeechLanguages.AsrCode(source, settings.SourceCode);
         settings.SourceLanguage = source?.Name ?? "自动识别";
@@ -40,12 +52,18 @@ public sealed class ConfigurationStore(string? root = null)
         settings.TranslationSettings().Validate();
         PromptBuilder.Validate(settings.CompatibleProfile);
         PromptBuilder.Validate(settings.DeepSeekProfile);
-        PromptBuilder.Validate(settings.LocalProfile);
-        if (settings.CompatibleProfile.OutputFormat != TranslationOutputFormat.CueIdJson || settings.DeepSeekProfile.OutputFormat != TranslationOutputFormat.CueIdJson || settings.LocalProfile.OutputFormat != TranslationOutputFormat.PlainText)
+        foreach (var (modelId, profile) in settings.EmbeddedModelProfiles)
+        {
+            _ = EmbeddedModelCatalog.Get(modelId);
+            PromptBuilder.Validate(profile);
+            if (profile.OutputFormat != TranslationOutputFormat.PlainText) throw new ArgumentException("内嵌模型提示词输出协议不匹配。");
+        }
+        PromptBuilder.Validate(settings.GetLocalProfile());
+        if (settings.CompatibleProfile.OutputFormat != TranslationOutputFormat.CueIdJson || settings.DeepSeekProfile.OutputFormat != TranslationOutputFormat.CueIdJson || settings.GetLocalProfile().OutputFormat != TranslationOutputFormat.PlainText)
             throw new ArgumentException("提示词输出协议不匹配。");
         // 高级参数可能包含凭据，即使选择本地也必须在写盘前验证。
         _ = settings.CloudOptions().AdditionalParameters();
-        if (settings.Provider == TranslationProvider.Local) settings.LocalOptions().Validate();
+        settings.LocalOptions().Validate();
         if (settings.Provider != TranslationProvider.Local)
             _ = CloudRequestBuilder.Build(settings.CloudOptions(), [new("user", "配置校验")], settings.Provider == TranslationProvider.DeepSeek ? settings.ThinkingOptions() : null);
     }

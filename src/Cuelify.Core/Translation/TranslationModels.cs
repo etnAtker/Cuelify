@@ -13,6 +13,7 @@ public sealed record TranslationSettings
     public int Concurrency { get; init; } = 1;
     public int MaximumBatchCharacters { get; init; } = 6000;
     public int ContextCues { get; init; } = 5;
+    public int FollowingContextCues { get; init; } = 2;
     public int MaximumContextCharacters { get; init; } = 3000;
     public int MaximumAttempts { get; init; } = 3;
     public TimeSpan RetryDelay { get; init; } = TimeSpan.FromSeconds(1);
@@ -22,14 +23,19 @@ public sealed record TranslationSettings
     {
         if (string.IsNullOrWhiteSpace(SourceLanguage) || string.IsNullOrWhiteSpace(TargetLanguage) ||
             BatchSize is < 1 or > 100 || Concurrency is < 1 or > 2 || MaximumBatchCharacters is < 100 or > 50000 ||
-            ContextCues is < 0 or > 8 || MaximumContextCharacters is < 0 or > 20000 || MaximumAttempts is < 1 or > 5 ||
+            ContextCues is < 0 or > 8 || FollowingContextCues is < 0 or > 8 || MaximumContextCharacters is < 0 or > 20000 || MaximumAttempts is < 1 or > 5 ||
             RetryDelay < TimeSpan.Zero || MaximumRetryDelay < RetryDelay || MaximumRetryDelay > TimeSpan.FromMinutes(5))
             throw new ArgumentException("翻译语言、批次、上下文或重试配置无效。");
     }
 }
 
 public sealed record PromptMessage(string Role, string Content);
-public sealed record TranslationRequest(IReadOnlyList<SubtitleCue> Cues, IReadOnlyList<PromptMessage> Messages);
+public sealed record TranslationPromptContext(PromptProfile Profile, TranslationSettings Settings, IReadOnlyList<SubtitleCue> Before, IReadOnlyList<SubtitleCue> After);
+public sealed record TranslationRequest(IReadOnlyList<SubtitleCue> Cues, IReadOnlyList<PromptMessage> Messages)
+{
+    // 裁剪参考内容后从模板重建，不能按字符切断渲染后的指令或当前字幕。
+    public TranslationPromptContext? PromptContext { get; init; }
+}
 public sealed record TranslationResponse(string Content);
 public interface ITranslationEngine
 {

@@ -12,8 +12,9 @@ public sealed record PromptVariableItem(string Name, string Description)
         "target_language" => "本次任务的目标语言，例如中文。",
         "target_style" => "翻译高级设置中填写的译文风格；未填写时为空。",
         "context_before" => "参考前文，包含原文与已有译文，用于理解语境，无需再次翻译。没有可用前文时为“（无）”。",
+        "context_after" => "参考后文，仅包含原文，用于理解当前字幕的省略和指代，无需翻译或输出。没有后文时为“（无）”。",
         "cues_json" => "本批待翻译字幕的 JSON，包含字幕标识与原文。云端翻译的用户模板需要保留此变量。",
-        "source_text" => "待翻译的原文。本地翻译时为当前单条字幕，本地用户模板需要保留此变量；云端批次中为多条原文按行拼接。",
+        "source_text" => "待翻译的原文。内嵌模型推理时为当前单条字幕，用户模板需要保留此变量；云端批次中为多条原文按行拼接。",
         _ => throw new InvalidOperationException("提示词变量缺少说明。")
     })).ToArray();
 }
