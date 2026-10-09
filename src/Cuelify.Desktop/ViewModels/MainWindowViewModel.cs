@@ -71,6 +71,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     [ObservableProperty] private string profileName = "";
     [ObservableProperty] private string systemTemplate = "";
     [ObservableProperty] private string userTemplate = "";
+    [ObservableProperty] private string promptVariableStatus = "";
     [ObservableProperty] private CueRow? selectedCue;
     [ObservableProperty] private string? presetSelection;
     public ObservableCollection<CueRow> Rows { get; } = [];
@@ -115,7 +116,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     public bool HasRows => Rows.Count > 0;
     public bool CanConfigure => !IsBusy && !IsInitializing && !IsCredentialBusy && !_disposed;
     public string ResultSummary => Rows.Count == 0 ? "字幕预览" : $"共 {Rows.Count} 条字幕 · 已翻译 {Rows.Count(row => row.Cue.TranslatedText is not null)} 条";
-    public string PromptVariables => string.Join("  ", PromptBuilder.Variables.Select(value => "{" + value + "}"));
+    public IReadOnlyList<PromptVariableItem> PromptVariables => PromptVariableItem.All;
     public bool IsWorkspace => Page == AppPage.Workspace;
     public bool IsSettings => Page == AppPage.Settings;
     public bool IsLogs => Page == AppPage.Logs;
@@ -198,6 +199,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         OnPropertyChanged(nameof(CanRun)); OnPropertyChanged(nameof(CanExport)); OnPropertyChanged(nameof(CanConfigure)); OnPropertyChanged(nameof(CanRetryCue)); OnPropertyChanged(nameof(CanPreview));
         RunCommand.NotifyCanExecuteChanged(); RetryCueCommand.NotifyCanExecuteChanged(); ExportCommand.NotifyCanExecuteChanged(); PreviewRequestCommand.NotifyCanExecuteChanged();
         ChooseMediaCommand.NotifyCanExecuteChanged(); ChooseModelCommand.NotifyCanExecuteChanged(); SaveSettingsCommand.NotifyCanExecuteChanged(); TestEngineCommand.NotifyCanExecuteChanged(); ResetPromptCommand.NotifyCanExecuteChanged();
+        CopyPromptVariableCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(CanAcceptDrop)); OnPropertyChanged(nameof(CanGoToOptions)); OnPropertyChanged(nameof(CanGoToResults)); OnPropertyChanged(nameof(CanStartNew));
         OnPropertyChanged(nameof(CanResume));
         NextStepCommand.NotifyCanExecuteChanged(); FileStepCommand.NotifyCanExecuteChanged(); OptionsStepCommand.NotifyCanExecuteChanged(); ResultsStepCommand.NotifyCanExecuteChanged(); NewTaskCommand.NotifyCanExecuteChanged();
@@ -213,6 +215,15 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     }
     [RelayCommand(CanExecute = nameof(HasLogs))]
     private void SelectAllLogs() => LogSelection.SelectAll();
+    private bool CanCopyPromptVariable(PromptVariableItem? variable) => CanConfigure && variable is not null && PromptVariables.Contains(variable);
+    [RelayCommand(CanExecute = nameof(CanCopyPromptVariable))]
+    private async Task CopyPromptVariableAsync(PromptVariableItem? variable)
+    {
+        if (!CanCopyPromptVariable(variable)) return;
+        PromptVariableStatus = "";
+        try { await _dialogs.CopyTextAsync(variable!.Placeholder); PromptVariableStatus = $"已复制 {variable.Placeholder}"; }
+        catch (Exception exception) { PromptVariableStatus = "复制失败，请重试。"; ReportError(exception); }
+    }
     [RelayCommand] private void ConfigureSpeech() { SettingsSectionIndex = 0; ShowSettings(); }
     [RelayCommand] private void ConfigureTranslation() { if (CanConfigure) ProviderIndex = TaskProviderIndex; SettingsSectionIndex = 1; ShowSettings(); }
     [RelayCommand] private void ConfigurePrompt() { if (CanConfigure) ProviderIndex = TaskProviderIndex; SettingsSectionIndex = 2; ShowSettings(); }

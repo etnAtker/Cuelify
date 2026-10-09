@@ -581,7 +581,8 @@ internal sealed class FakeDialogs : IWindowDialogs
         await submit(Password, purpose == PasswordPurpose.Change ? NewPassword : Password); return true;
     }
     public string? CopiedText { get; private set; }
-    public Task CopyTextAsync(string text) { CopiedText = text; return Task.CompletedTask; }
+    public Exception? CopyFailure { get; set; }
+    public Task CopyTextAsync(string text) { if (CopyFailure is not null) return Task.FromException(CopyFailure); CopiedText = text; return Task.CompletedTask; }
     public bool Confirm { get; set; } = true;
     public string? SavePath { get; set; }
     public string? SuggestedName { get; private set; }

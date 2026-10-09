@@ -12,6 +12,13 @@
   <Style Selector="Border.surface"><Setter Property="Background" Value="{DynamicResource Brush.Surface}" /><Setter Property="CornerRadius" Value="{StaticResource Radius.Surface}" /><Setter Property="Padding" Value="{StaticResource Inset.Section}" /></Style>
   <Style Selector="TextBox"><Setter Property="MinHeight" Value="36" /></Style>
   <Style Selector="Button"><Setter Property="MinHeight" Value="36" /></Style>
+  <Style Selector="Button.prompt-variable">
+    <Setter Property="Padding" Value="8,4" />
+    <Setter Property="Background" Value="{DynamicResource Brush.Surface}" />
+    <Setter Property="Foreground" Value="{DynamicResource Brush.Text}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Brush.Divider}" />
+    <Setter Property="BorderThickness" Value="1" />
+  </Style>
   <Style Selector="ListBoxItem"><Setter Property="HorizontalContentAlignment" Value="Stretch" /></Style>
   <Style Selector="TabItem"><Setter Property="FontSize" Value="14" /></Style>
   <Style Selector="Button.navigation">

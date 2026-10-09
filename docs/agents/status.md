@@ -10,6 +10,14 @@
 
 维护者已指定自有代码与文档使用 [MIT 许可证](../../LICENSE)，Copyright (c) 2026 etnAtker；发行包包含项目许可证并保留第三方声明，见 D010。项目许可选择不代表所有原生间接组件的发行义务已经完成核验。
 
+## 提示词变量 UI 验证
+
+将提示词页的纯文本变量列表改为可换行按钮：悬停和键盘聚焦展示中文说明，点击/键盘激活复制完整占位符，附近显示成功或失败反馈；Escape 关闭说明。变量名复用 Core 白名单，云端/本地所需变量在说明中区分，不改变翻译请求或模板校验。按钮内容使用 TextBlock，避免下划线被识别为助记键而消失。
+
+执行 `dotnet build tests/Cuelify.Desktop.Tests/Cuelify.Desktop.Tests.csproj -c Release --no-restore`，零警告/零错误；最终执行 `dotnet test tests/Cuelify.Desktop.Tests/Cuelify.Desktop.Tests.csproj -c Release --no-restore --filter 'FullyQualifiedName~PromptVariableTests' --logger 'trx;LogFileName=prompt-variable-tests.trx'`，3 项通过。覆盖真实 XAML 数据模板与说明绑定、鼠标悬停、点击复制、键盘说明/Enter/Escape、剪贴板失败与重试、复制不修改模板，以及浅色 1240×860/深色 900×640 的布局边界。
+
+Headless 截图位于忽略目录 `artifacts/ui-prompt-variables/`，剪贴板使用测试替身；没有进行原生剪贴板/GUI/DPI 人工验收，没有真实 API 或模型调用。本轮按 UI 范围验证，未重复无关全量测试。
+
 ## 本轮主密码凭证验证
 
 2026-10-09，在 Windows x64 / .NET SDK 10.0.301 上实现跨平台主密码凭证层。新增 Infrastructure `CredentialStore`、桌面凭证状态与主密码弹窗；移除环境变量 Key 读取，未新增依赖或更改锁文件。

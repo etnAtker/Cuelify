@@ -156,7 +156,31 @@
                 </StackPanel>
                 <TextBlock Text="模板名称" />
                 <TextBox Text="{Binding ProfileName}" AutomationProperties.Name="模板名称" />
-                <TextBlock Classes="muted" Text="{Binding PromptVariables}" />
+                <TextBlock Text="可用变量" />
+                <Grid ColumnDefinitions="*,Auto">
+                  <TextBlock Classes="muted" Text="悬停查看说明，点击复制。" />
+                  <TextBlock Grid.Column="1" Classes="muted" Text="{Binding PromptVariableStatus}" AutomationProperties.LiveSetting="Polite" HorizontalAlignment="Right" />
+                </Grid>
+                <ItemsControl x:Name="PromptVariableList" ItemsSource="{Binding PromptVariables}">
+                  <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel ItemSpacing="8" LineSpacing="8" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:PromptVariableItem">
+                      <Button x:Name="VariableButton" Classes="prompt-variable" CommandParameter="{Binding .}"
+                              Command="{Binding $parent[ItemsControl].((vm:MainWindowViewModel)DataContext).CopyPromptVariableCommand}"
+                              AutomationProperties.Name="{Binding CopyLabel}" AutomationProperties.HelpText="{Binding Description}"
+                              GotFocus="OnPromptVariableGotFocus" LostFocus="OnPromptVariableLostFocus" KeyDown="OnPromptVariableKeyDown">
+                        <TextBlock Text="{Binding Placeholder}" />
+                        <ToolTip.Tip>
+                          <StackPanel DataContext="{Binding #VariableButton.((vm:PromptVariableItem)DataContext)}" MaxWidth="360" Spacing="6">
+                            <TextBlock Text="{Binding Placeholder}" FontWeight="SemiBold" />
+                            <TextBlock Text="{Binding Description}" TextWrapping="Wrap" />
+                            <TextBlock Classes="muted" Text="点击复制完整占位符。" />
+                          </StackPanel>
+                        </ToolTip.Tip>
+                      </Button>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
                 <TextBlock Text="系统提示词" />
                 <TextBlock Classes="muted" Text="{Binding SystemPromptHint}" />
                 <TextBox Text="{Binding SystemTemplate}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="160" AutomationProperties.Name="系统提示词" />
