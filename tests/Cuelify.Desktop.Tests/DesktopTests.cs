@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
+using Avalonia.Input;
 using Avalonia.Styling;
 using Cuelify.Core.Media;
 using Cuelify.Core.Subtitles;
@@ -11,6 +12,7 @@ using Cuelify.Desktop.Services;
 using Cuelify.Desktop.ViewModels;
 using Cuelify.Desktop.Views;
 using Cuelify.Infrastructure.Transcription;
+using Cuelify.Infrastructure.Storage;
 using Cuelify.Infrastructure.Translation;
 using Xunit;
 
@@ -25,6 +27,95 @@ public static class TestAppBuilder
 
 public sealed class DesktopTests
 {
+    [AvaloniaFact]
+    public async Task LogSelectionCopiesSingleMultipleAndAllEntriesInDisplayOrder()
+    {
+        using var fixture = new Fixture(); await using var model = fixture.Model();
+        var window = new MainWindow { DataContext = model, Width = 1240, Height = 860 };
+        window.Show(); await model.InitializeCommand.ExecuteAsync(null); model.Log.Clear(); model.ShowLogsCommand.Execute(null);
+        model.Log.Add("第一条\n调用栈"); model.Log.Add("第二条"); model.Log.Add("第三条");
+        var list = window.FindControl<LogsView>("LogsPage")!.FindControl<ListBox>("LogList")!;
+        await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => { }, Avalonia.Threading.DispatcherPriority.Background);
+        Assert.False(model.CopyLogsCommand.CanExecute(null));
+        list.Selection.Select(2);
+        await model.CopyLogsCommand.ExecuteAsync(null);
+        Assert.Equal("第三条", fixture.Dialogs.CopiedText);
+        list.Selection.Select(0);
+        Assert.Equal(2, model.LogSelection.Count);
+        Assert.True(list.Focus()); window.KeyPress(Key.C, RawInputModifiers.Control, PhysicalKey.C, "c");
+        await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => { }, Avalonia.Threading.DispatcherPriority.Background);
+        if (model.CopyLogsCommand.ExecutionTask is { } copying) await copying;
+        Assert.Equal("第一条\n调用栈" + Environment.NewLine + "第三条", fixture.Dialogs.CopiedText);
+        window.KeyPress(Key.A, RawInputModifiers.Control, PhysicalKey.A, "a");
+        await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => { }, Avalonia.Threading.DispatcherPriority.Background);
+        Assert.Equal(3, model.LogSelection.Count);
+        await model.CopyLogsCommand.ExecuteAsync(null);
+        Assert.Equal(string.Join(Environment.NewLine, model.Log), fixture.Dialogs.CopiedText);
+        model.LogSelection.Clear(); Assert.False(model.CopyLogsCommand.CanExecute(null));
+        model.Log.Add("第二条"); list.Selection.Select(1);
+        await model.CopyLogsCommand.ExecuteAsync(null);
+        Assert.Equal("第二条", fixture.Dialogs.CopiedText);
+        model.Log.RemoveAt(0); await model.CopyLogsCommand.ExecuteAsync(null);
+        Assert.Equal("第二条", fixture.Dialogs.CopiedText);
+        model.LogSelection.Clear();
+        using (var frame = window.CaptureRenderedFrame()) Assert.NotNull(frame);
+        Click(0, RawInputModifiers.None); Click(2, RawInputModifiers.Control);
+        Assert.Equal(new[] { 0, 2 }, model.LogSelection.SelectedIndexes);
+        Click(1, RawInputModifiers.Shift);
+        Assert.Equal(new[] { 1, 2 }, model.LogSelection.SelectedIndexes);
+        window.Close();
+
+        void Click(int index, RawInputModifiers modifiers)
+        {
+            var item = list.ContainerFromIndex(index)!;
+            var point = item.TranslatePoint(new Point(8, 8), window)!.Value;
+            window.MouseDown(point, MouseButton.Left, modifiers);
+            window.MouseUp(point, MouseButton.Left, modifiers);
+        }
+    }
+
+    [AvaloniaTheory]
+    [InlineData("日语", "jpn", "日语")]
+    [InlineData("ja-JP", "jpn", "日语")]
+    [InlineData("自动识别", "", "自动识别")]
+    public async Task OneSourceLanguageDrivesRecognitionAndTranslation(string input, string code, string name)
+    {
+        using var fixture = new Fixture(); await using var model = fixture.Model();
+        model.InputPath = "fixture.mp4"; model.TaskSourceLanguage = input;
+        await model.RunCommand.ExecuteAsync(null);
+        Assert.Equal(code, fixture.Jobs.RecognitionSettings!.SourceCode);
+        Assert.Equal(name, fixture.Jobs.LastSettings!.SourceLanguage);
+        Assert.True(model.CanExport);
+        model.Settings.SourceLanguage = "英语"; await model.SaveSettingsCommand.ExecuteAsync(null);
+        model.SelectedCue = model.Rows[0]; await model.RetryCueCommand.ExecuteAsync(null);
+        Assert.Equal(name, fixture.Jobs.LastSettings!.SourceLanguage);
+    }
+
+    [AvaloniaFact]
+    public async Task InvalidSourceLanguageDoesNotStartPaidRecognition()
+    {
+        using var fixture = new Fixture(); await using var model = fixture.Model();
+        model.InputPath = "fixture.mp4"; model.TaskSourceLanguage = "无效语言";
+        await model.RunCommand.ExecuteAsync(null);
+        Assert.Equal(0, fixture.Jobs.Transcriptions); Assert.Contains("源语言无效", model.Error);
+    }
+
+    [AvaloniaFact]
+    public async Task LegacyLanguageCodeMigratesWithoutChangingPaidCacheIdentity()
+    {
+        using var fixture = new Fixture();
+        await AtomicFile.WriteJsonAsync(Path.Combine(fixture.Root, "settings.json"),
+            new AppSettings { SourceCode = "ja", SourceLanguage = "英语" }, CancellationToken.None);
+        await using var model = fixture.Model(); await model.InitializeCommand.ExecuteAsync(null);
+        Assert.Equal("日语", model.DefaultSourceLanguage); Assert.Equal("日语", model.TaskSourceLanguage);
+        model.InputPath = "fixture.mp4"; await model.RunCommand.ExecuteAsync(null);
+        Assert.Equal("ja", fixture.Jobs.RecognitionSettings!.SourceCode);
+        Assert.Equal("日语", fixture.Jobs.LastSettings!.SourceLanguage);
+        model.DefaultSourceLanguage = "英语"; await model.SaveSettingsCommand.ExecuteAsync(null);
+        Assert.Equal("eng", model.Settings.SourceCode);
+        model.NewTaskCommand.Execute(null); Assert.Equal("英语", model.TaskSourceLanguage);
+    }
+
     [AvaloniaFact]
     public async Task FileProbeAndSettingsRoundTripPreserveTaskChoicesWithoutStartingRecognition()
     {
@@ -151,6 +242,7 @@ public sealed class DesktopTests
         Assert.True(next.IsEffectivelyVisible); Assert.False(next.IsEffectivelyEnabled);
         model.InputPath = "fixture.mp4"; await model.NextStepCommand.ExecuteAsync(null);
         await Capture("翻译选项");
+        Assert.Equal("自动识别", workspace.FindControl<ComboBox>("SourceLanguageBox")!.SelectedItem);
         Assert.True(workspace.FindControl<Button>("RunButton")!.IsEffectivelyVisible);
         model.ShowSettingsCommand.Execute(null);
         for (var section = 0; section < 4; section++) { model.SettingsSectionIndex = section; await Capture("设置-" + section); }
@@ -466,6 +558,8 @@ internal sealed class Fixture : IDisposable
 }
 internal sealed class FakeDialogs : IWindowDialogs
 {
+    public string? CopiedText { get; private set; }
+    public Task CopyTextAsync(string text) { CopiedText = text; return Task.CompletedTask; }
     public bool Confirm { get; set; } = true;
     public string? SavePath { get; set; }
     public string? SuggestedName { get; private set; }
@@ -489,11 +583,13 @@ internal sealed class FakeJobs : IDesktopJobService
     public Exception? TranslationFailure;
     public string? FailureReason;
     public AppSettings? LastSettings;
+    public AppSettings? RecognitionSettings;
     public AppSettings? PreviewSettings;
     public IReadOnlySet<string>? Forced;
     public Task<MediaInfo> ProbeAsync(string input, AppSettings settings, CancellationToken token) => ProbeFailure is null ? Task.FromResult(new MediaInfo(TimeSpan.FromSeconds(5), 0)) : Task.FromException<MediaInfo>(ProbeFailure);
     public async Task<TranscriptionResult> TranscribeAsync(string input, AppSettings settings, string key, IProgress<TranscriptionProgress> progress, CancellationToken token)
     {
+        RecognitionSettings = settings;
         Transcriptions++; Started.TrySetResult();
         if (Block) await Task.Delay(Timeout.Infinite, token);
         if (Failure is not null) throw Failure;

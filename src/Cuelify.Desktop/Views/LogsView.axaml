@@ -6,9 +6,21 @@
     </Grid>
     <TabControl Grid.Row="1" Margin="0,24,0,0">
       <TabItem Header="运行日志">
-        <ListBox ItemsSource="{Binding Log}" Margin="0,16,0,0" AutomationProperties.Name="运行日志">
-          <ListBox.ItemTemplate><DataTemplate x:DataType="x:String"><TextBlock Text="{Binding .}" TextWrapping="Wrap" /></DataTemplate></ListBox.ItemTemplate>
-        </ListBox>
+        <Grid RowDefinitions="Auto,*" Margin="0,16,0,0">
+          <StackPanel Orientation="Horizontal" Spacing="12" Margin="0,0,0,12">
+            <Button Content="复制所选日志" Command="{Binding CopyLogsCommand}" />
+            <Button Content="全选" Command="{Binding SelectAllLogsCommand}" />
+            <TextBlock Classes="muted" Text="Ctrl / Shift 多选，Ctrl+C 复制" VerticalAlignment="Center" />
+          </StackPanel>
+          <ListBox x:Name="LogList" Grid.Row="1" ItemsSource="{Binding Log}" Selection="{Binding LogSelection}" SelectionMode="Multiple" Focusable="True" AutomationProperties.Name="运行日志">
+            <ListBox.KeyBindings>
+              <KeyBinding Gesture="Ctrl+C" Command="{Binding CopyLogsCommand}" />
+              <KeyBinding Gesture="Ctrl+A" Command="{Binding SelectAllLogsCommand}" />
+            </ListBox.KeyBindings>
+            <ListBox.ContextMenu><ContextMenu><MenuItem Header="复制所选日志" Command="{Binding CopyLogsCommand}" InputGesture="Ctrl+C" /></ContextMenu></ListBox.ContextMenu>
+            <ListBox.ItemTemplate><DataTemplate x:DataType="x:String"><TextBlock Text="{Binding .}" TextWrapping="Wrap" /></DataTemplate></ListBox.ItemTemplate>
+          </ListBox>
+        </Grid>
       </TabItem>
       <TabItem Header="请求预览">
         <Grid RowDefinitions="Auto,*" Margin="0,16,0,0">

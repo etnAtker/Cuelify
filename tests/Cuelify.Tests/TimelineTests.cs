@@ -65,7 +65,7 @@ public sealed class TimelineTests
     }
 
     [Theory]
-    [InlineData(-1, 1)] [InlineData(1, 1)] [InlineData(1.5, 1)] [InlineData(0, 2.2)]
+    [InlineData(-1, 1)] [InlineData(1.5, 1)] [InlineData(0, 2.2)]
     public void InvalidLocalTimesFail(double start, double end) => Assert.Throws<InvalidDataException>(() =>
         WordTimelineMerger.ToGlobal(new(new(0, S(0), S(2), false), new("en", [W("word", start, end)]))));
 
@@ -74,6 +74,79 @@ public sealed class TimelineTests
     {
         var words = WordTimelineMerger.ToGlobal(new(new(0, S(10), S(12), false), new("en", [W("word", 1.9, 2.02)])));
         Assert.Equal(S(12), words[0].End);
+    }
+
+    [Fact]
+    public void ZeroDurationPrefixMergesWithFollowingWordWithoutInventingTime()
+    {
+        var words = WordTimelineMerger.ToGlobal(new(new(0, S(10), S(13), false),
+            new("zho", [W("你", 1, 1), W("吃饭了吗", 1, 2.5)])));
+        var cue = Assert.Single(new CueBuilder().Build(words));
+        Assert.Equal("你吃饭了吗", cue.SourceText);
+        Assert.Equal(S(11), cue.Start); Assert.Equal(S(12.5), cue.End);
+    }
+
+    [Fact]
+    public void ConsecutiveZeroDurationWordsPreserveRepeatedTextAndMergeAtBothEnds()
+    {
+        var words = WordTimelineMerger.ToGlobal(new(new(0, S(0), S(2), false),
+            new("zho", [W("你", 1, 1), W("你", 1, 1), W("好", 1, 2), W("啊", 2, 2)])));
+        var cue = Assert.Single(new CueBuilder().Build(words));
+        Assert.Equal("你你好啊", cue.SourceText);
+        Assert.Equal(S(1), cue.Start); Assert.Equal(S(2), cue.End);
+        Assert.Contains("00:00:01,000 --> 00:00:02,000", SrtSerializer.SerializeSource([cue]));
+    }
+
+    [Fact]
+    public void TrailingZeroDurationPunctuationMergesEvenAfterSentenceBoundary()
+    {
+        var cues = new CueBuilder().Build([W("你好", 0, 1.1), W("。", 1.1, 1.1), W("再见", 3, 4)]);
+        Assert.Equal(2, cues.Count); Assert.Equal("你好。", cues[0].SourceText);
+        Assert.Equal(S(1.1), cues[0].End);
+    }
+
+    [Fact]
+    public void ZeroDurationWordsUseNearestCompatibleSpeakerAndTimeRangeUnion()
+    {
+        var cues = new CueBuilder().Build([W("甲", 0, 1, "a"), W("尾", 1.2, 1.2, "a"),
+            W("乙", 1.2, 2, "b")]);
+        Assert.Equal(2, cues.Count); Assert.Equal("甲尾", cues[0].SourceText);
+        Assert.Equal(S(1.2), cues[0].End); Assert.Equal("乙", cues[1].SourceText);
+    }
+
+    [Fact]
+    public void MergingAcrossAnOverlappingSpeakerStillOrdersCuesByStartTime()
+    {
+        var cues = new CueBuilder().Build([W("你", 0, 0, "a"), W("是", .1, .3, "b"), W("好", .4, .8, "a")]);
+        Assert.Equal(2, cues.Count); Assert.Equal("你好", cues[0].SourceText);
+        Assert.Equal(S(0), cues[0].Start); Assert.Equal(S(.1), cues[1].Start);
+        Assert.Contains("你好", SrtSerializer.SerializeSource(cues));
+    }
+
+    [Fact]
+    public void IsolatedZeroDurationWordsBecomeOneSentenceForConfiguredDuration()
+    {
+        var cue = Assert.Single(new CueBuilder().Build([W("你", 1, 1), W("好", 1, 1), W("啊", 1, 1)]));
+        Assert.Equal("你好啊", cue.SourceText); Assert.Equal(S(1), cue.Start); Assert.Equal(S(1.5), cue.End);
+    }
+
+    [Theory]
+    [InlineData(.5, true)] [InlineData(.5001, false)]
+    public void ZeroDurationToleranceBoundaryKeepsDistantWordsInIndependentSentences(double gap, bool merges)
+    {
+        var cues = new CueBuilder().Build([W("你", 1, 1), W("好", 1 + gap, 2.5)]);
+        Assert.Equal(merges ? 1 : 2, cues.Count);
+        Assert.Equal(merges ? "你好" : "你", cues[0].SourceText);
+        Assert.Equal(merges ? S(2.5) : S(1.5), cues[0].End);
+    }
+
+    [Fact]
+    public void ZeroDurationToleranceCanBeConfiguredWithoutChangingRecognitionWords()
+    {
+        var words = new[] { W("你", 1, 1), W("好", 1.4, 2) };
+        var cues = new CueBuilder().Build(words, new() { ZeroDurationTolerance = S(.2) });
+        Assert.Equal(2, cues.Count); Assert.Equal(S(1.2), cues[0].End);
+        Assert.Single(new CueBuilder().Build(words)); Assert.Equal(words[0].Start, words[0].End);
     }
 
     [Fact]

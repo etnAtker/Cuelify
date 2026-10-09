@@ -41,11 +41,12 @@
         </Border>
         <StackPanel Spacing="8" IsEnabled="{Binding CanConfigure}">
           <Grid ColumnDefinitions="*,16,*" RowDefinitions="Auto,Auto">
-            <TextBlock Text="原文语言" Margin="0,0,0,8" />
-            <TextBox Grid.Row="1" Text="{Binding TaskSourceLanguage}" Watermark="自动识别" AutomationProperties.Name="本次原文语言" />
+            <TextBlock Text="源语言" Margin="0,0,0,8" />
+            <ComboBox x:Name="SourceLanguageBox" Grid.Row="1" SelectedItem="{Binding TaskSourceLanguage}" ItemsSource="{Binding SourceLanguageNames}" HorizontalAlignment="Stretch" AutomationProperties.Name="本次源语言" />
             <TextBlock Grid.Column="2" Text="目标语言" Margin="0,0,0,8" />
             <TextBox Grid.Row="1" Grid.Column="2" Text="{Binding TaskTargetLanguage}" AutomationProperties.Name="本次目标语言" />
           </Grid>
+          <TextBlock Classes="muted" Text="源语言同时用于语音识别和翻译；不确定时选择自动识别。" />
           <TextBlock Text="翻译引擎" />
           <ComboBox ItemsSource="{Binding ProviderNames}" SelectedIndex="{Binding TaskProviderIndex}" HorizontalAlignment="Stretch" AutomationProperties.Name="本次翻译引擎" />
         </StackPanel>
@@ -53,9 +54,6 @@
           <StackPanel Spacing="6"><TextBlock Classes="muted" Text="{Binding TaskServiceSummary}" /><TextBlock Classes="muted" Text="{Binding TaskPromptSummary}" /></StackPanel>
           <StackPanel Grid.Column="1" Spacing="8" Orientation="Horizontal"><Button Content="服务设置" Command="{Binding ConfigureTranslationCommand}" /><Button Content="编辑提示词" Command="{Binding ConfigurePromptCommand}" /></StackPanel>
         </Grid>
-        <Expander Header="指定识别语言" IsEnabled="{Binding CanConfigure}">
-          <StackPanel Spacing="8"><TextBlock Classes="muted" Text="留空时自动识别；可填写 en、ja 等语言代码。" /><TextBox Text="{Binding TaskSourceCode}" AutomationProperties.Name="本次识别语言代码" /></StackPanel>
-        </Expander>
         <TextBlock Classes="muted" Text="音频将发送至 ElevenLabs。选择云端翻译时，字幕原文也会发送至对应服务，可能产生费用。" />
       </StackPanel>
     </ScrollViewer>

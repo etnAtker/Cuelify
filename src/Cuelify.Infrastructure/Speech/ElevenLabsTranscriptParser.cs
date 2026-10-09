@@ -20,7 +20,7 @@ public static class ElevenLabsTranscriptParser
                 if (!word.TryGetProperty("text", out var text) || text.ValueKind != JsonValueKind.String ||
                     !word.TryGetProperty("start", out var start) || !start.TryGetDouble(out var startSeconds) ||
                     !word.TryGetProperty("end", out var end) || !end.TryGetDouble(out var endSeconds) ||
-                    !double.IsFinite(startSeconds) || !double.IsFinite(endSeconds) || startSeconds < 0 || endSeconds <= startSeconds || endSeconds > 36000 ||
+                    !double.IsFinite(startSeconds) || !double.IsFinite(endSeconds) || startSeconds < 0 || endSeconds < startSeconds || endSeconds > 36000 ||
                     string.IsNullOrWhiteSpace(text.GetString()))
                     throw new InvalidDataException("ASR 返回了无效的词文本或时间戳。");
                 var speaker = word.TryGetProperty("speaker_id", out var speakerId) && speakerId.ValueKind == JsonValueKind.String ? speakerId.GetString() : null;

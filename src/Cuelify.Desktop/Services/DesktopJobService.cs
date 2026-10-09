@@ -39,6 +39,7 @@ public sealed class DesktopJobService(string? root = null) : IDesktopJobService
         var asrOptions = new ElevenLabsAsrOptions { ModelId = settings.AsrModel, LanguageCode = string.IsNullOrWhiteSpace(settings.SourceCode) ? null : settings.SourceCode, MaximumUploadBytes = settings.MaximumUploadBytes };
         var options = new TranscriptionOptions
         {
+            Cues = new CueBuilderOptions { ZeroDurationTolerance = TimeSpan.FromMilliseconds(settings.ZeroDurationToleranceMs) },
             Chunks = new ChunkPlannerOptions { TargetDuration = TimeSpan.FromSeconds(settings.ChunkTargetSeconds), MaximumDuration = TimeSpan.FromSeconds(settings.ChunkMaximumSeconds), SearchRadius = TimeSpan.FromSeconds(settings.ChunkSearchSeconds), ForcedOverlap = TimeSpan.FromMilliseconds(settings.OverlapMs), MaximumUploadBytes = settings.MaximumUploadBytes, AlwaysChunk = settings.AlwaysChunk },
             Concurrency = settings.AsrConcurrency, MaximumAttempts = settings.MaximumAttempts
         };

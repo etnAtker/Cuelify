@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Cuelify.Core.Translation;
 using Cuelify.Infrastructure.Storage;
+using Cuelify.Infrastructure.Speech;
 using Cuelify.Infrastructure.Translation;
 
 namespace Cuelify.Desktop.Services;
@@ -8,7 +9,18 @@ namespace Cuelify.Desktop.Services;
 public sealed class ConfigurationStore(string? root = null)
 {
     public string Root { get; } = root ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Cuelify");
-    public Task<AppSettings?> LoadAsync(CancellationToken token = default) => AtomicFile.ReadJsonAsync<AppSettings>(Path.Combine(Root, "settings.json"), token);
+    public async Task<AppSettings?> LoadAsync(CancellationToken token = default)
+    {
+        var settings = await AtomicFile.ReadJsonAsync<AppSettings>(Path.Combine(Root, "settings.json"), token);
+        if (settings is not null)
+        {
+            // 旧版识别代码优先：这是原任务实际发送给 ASR 的语言。
+            var source = SpeechLanguages.Resolve(string.IsNullOrWhiteSpace(settings.SourceCode) ? settings.SourceLanguage : settings.SourceCode);
+            settings.SourceLanguage = source?.Name ?? "自动识别";
+            settings.SourceCode = SpeechLanguages.AsrCode(source, settings.SourceCode);
+        }
+        return settings;
+    }
     public Task SaveAsync(AppSettings settings, IEnumerable<string> secrets, CancellationToken token = default)
     {
         Validate(settings);
@@ -20,6 +32,10 @@ public sealed class ConfigurationStore(string? root = null)
     public static AppSettings Snapshot(AppSettings settings) => JsonSerializer.Deserialize<AppSettings>(JsonSerializer.Serialize(settings))!;
     public static void Validate(AppSettings settings)
     {
+        var source = SpeechLanguages.Resolve(settings.SourceLanguage);
+        settings.SourceCode = SpeechLanguages.AsrCode(source, settings.SourceCode);
+        settings.SourceLanguage = source?.Name ?? "自动识别";
+        if (settings.ZeroDurationToleranceMs is < 1 or > 7000) throw new ArgumentException("零时长字幕的合并间隔应为 1～7000 毫秒。");
         if (!Enum.IsDefined(settings.Provider) || settings.Theme is not ("系统" or "浅色" or "深色")) throw new ArgumentException("提供商或主题无效。");
         settings.TranslationSettings().Validate();
         PromptBuilder.Validate(settings.CompatibleProfile);

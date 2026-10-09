@@ -45,10 +45,11 @@ public sealed class WordTimelineMerger
         var seen = new HashSet<WordToken>();
         foreach (var word in item.Transcript.Words)
         {
-            if (string.IsNullOrWhiteSpace(word.Text) || word.Start < TimeSpan.Zero || word.End <= word.Start ||
-                word.Start >= item.Chunk.Duration || word.End > item.Chunk.Duration + TimeSpan.FromMilliseconds(100))
+            if (string.IsNullOrWhiteSpace(word.Text) || word.Start < TimeSpan.Zero || word.End < word.Start ||
+                word.Start > item.Chunk.Duration || (word.Start == item.Chunk.Duration && word.End > word.Start) ||
+                word.End > item.Chunk.Duration + TimeSpan.FromMilliseconds(100))
                 throw new InvalidDataException($"分片 {item.Chunk.Index} 返回了不合法的词时间戳。");
-            if (seen.Add(word)) result.Add(word with { Start = item.Chunk.Start + word.Start, End = item.Chunk.Start + Min(word.End, item.Chunk.Duration) });
+            if (word.End == word.Start || seen.Add(word)) result.Add(word with { Start = item.Chunk.Start + word.Start, End = item.Chunk.Start + Min(word.End, item.Chunk.Duration) });
         }
         return result;
     }
@@ -59,7 +60,8 @@ public sealed class WordTimelineMerger
             (left.SpeakerId is not null && right.SpeakerId is not null && left.SpeakerId != right.SpeakerId)) return false;
         var intersection = Min(left.End, right.End) - Max(left.Start, right.Start);
         var shorter = Min(left.End - left.Start, right.End - right.Start);
-        return intersection > TimeSpan.Zero && intersection.Ticks >= shorter.Ticks / 2 &&
+        return ((left.Start == left.End && right.Start == right.End && left.Start == right.Start) ||
+            (intersection > TimeSpan.Zero && intersection.Ticks >= shorter.Ticks / 2)) &&
             Math.Abs((left.Start + (left.End - left.Start) / 2 - right.Start - (right.End - right.Start) / 2).TotalMilliseconds) <= 200;
     }
 

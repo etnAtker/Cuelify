@@ -9,10 +9,14 @@ public interface IWindowDialogs
     Task<string?> OpenAsync(string title, string[] patterns);
     Task<string?> SaveSrtAsync(string suggestedName);
     Task<bool> ConfirmAsync(string message);
+    Task CopyTextAsync(string text) => throw new NotSupportedException("剪贴板不可用。");
 }
 
 public sealed class WindowDialogs(Window owner) : IWindowDialogs
 {
+    public Task CopyTextAsync(string text) => owner.Clipboard?.SetTextAsync(text) ??
+        throw new InvalidOperationException("剪贴板不可用。");
+
     public async Task<string?> OpenAsync(string title, string[] patterns)
     {
         if (!owner.StorageProvider.CanOpen) throw new InvalidOperationException("文件选择器不可用。");

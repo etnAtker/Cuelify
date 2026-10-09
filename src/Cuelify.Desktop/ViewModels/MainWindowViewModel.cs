@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using Avalonia.Threading;
+using Avalonia.Controls.Selection;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Cuelify.Core.Subtitles;
@@ -8,6 +9,7 @@ using Cuelify.Core.Translation;
 using Cuelify.Desktop.Services;
 using Cuelify.Infrastructure;
 using Cuelify.Infrastructure.Storage;
+using Cuelify.Infrastructure.Speech;
 using Cuelify.Infrastructure.Transcription;
 using Cuelify.Infrastructure.Translation;
 using Cuelify.Infrastructure.Translation.Local;
@@ -53,7 +55,6 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     [ObservableProperty] private int settingsSectionIndex;
     [ObservableProperty] private bool hasUnsavedSettings;
     [ObservableProperty] private string settingsStatus = "";
-    [ObservableProperty] private string taskSourceCode = "";
     [ObservableProperty] private string taskSourceLanguage = "自动识别";
     [ObservableProperty] private string taskTargetLanguage = "中文";
     [ObservableProperty] private int taskProviderIndex = (int)TranslationProvider.DeepSeek;
@@ -75,7 +76,20 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     [ObservableProperty] private string? presetSelection;
     public ObservableCollection<CueRow> Rows { get; } = [];
     public ObservableCollection<string> Log { get; } = [];
+    public SelectionModel<string> LogSelection { get; } = new() { SingleSelect = false };
+    public bool CanCopyLogs => LogSelection.Count > 0;
+    public bool HasLogs => Log.Count > 0;
     public string[] ProviderNames { get; } = ["OpenAI 兼容服务", "DeepSeek", "本地 Hy-MT2"];
+    public string[] SourceLanguageNames => SpeechLanguages.Names;
+    public string DefaultSourceLanguage
+    {
+        get => Settings.SourceLanguage;
+        set
+        {
+            Settings.SourceLanguage = value;
+            OnPropertyChanged();
+        }
+    }
     public string[] ThemeNames { get; } = ["系统", "浅色", "深色"];
     public string[] EffortNames { get; } = ["低", "高", "最高"];
     public string[] ReasoningCapabilityNames { get; } = ["不设置", "服务自定义参数", "标准思考强度参数"];
@@ -116,7 +130,8 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     public bool CanResume => CanContinue && IsResultsStep && !IsBusy;
     public bool CanStartNew => CanConfigure && IsResultsStep && _jobSettings is not null;
     public string FileName => string.IsNullOrWhiteSpace(InputPath) ? "尚未选择文件" : Path.GetFileName(InputPath);
-    public string TaskPromptSummary => TaskSettings().GetProfile().Name;
+    public string TaskPromptSummary => (TaskProviderIndex == (int)TranslationProvider.Local ? _savedSettings.LocalProfile :
+        TaskProviderIndex == (int)TranslationProvider.DeepSeek ? _savedSettings.DeepSeekProfile : _savedSettings.CompatibleProfile).Name;
     public string TaskServiceSummary => TaskProviderIndex == (int)TranslationProvider.Local ? "本地 Hy-MT2" : $"{ProviderNames[Math.Clamp(TaskProviderIndex, 0, 2)]} · {_savedSettings.CloudModel}";
     public string SettingsHint => IsBusy ? "任务正在进行，相关设置暂时无法修改。" : HasUnsavedSettings ? "有未保存的修改。保存后用于新的处理。" : "已保存的设置用于新的处理。";
 
@@ -124,6 +139,9 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     {
         _jobs = jobs; _store = store; _dialogs = dialogs;
         Settings.PropertyChanged += SettingsChanged;
+        LogSelection.Source = Log;
+        LogSelection.SelectionChanged += (_, _) => { OnPropertyChanged(nameof(CanCopyLogs)); CopyLogsCommand.NotifyCanExecuteChanged(); };
+        Log.CollectionChanged += (_, _) => { OnPropertyChanged(nameof(HasLogs)); SelectAllLogsCommand.NotifyCanExecuteChanged(); };
         LoadProfile();
         _savedSettings = ConfigurationStore.Snapshot(Settings);
         HasUnsavedSettings = false;
@@ -132,13 +150,15 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     {
         var snapshot = ConfigurationStore.Snapshot(_savedSettings);
         snapshot.Provider = (TranslationProvider)TaskProviderIndex;
-        snapshot.SourceCode = TaskSourceCode;
-        snapshot.SourceLanguage = TaskSourceLanguage;
+        var source = SpeechLanguages.Resolve(TaskSourceLanguage);
+        snapshot.SourceCode = SpeechLanguages.AsrCode(source, _savedSettings.SourceCode);
+        snapshot.SourceLanguage = source?.Name ?? "自动识别";
         snapshot.TargetLanguage = TaskTargetLanguage;
         return snapshot;
     }
     private void SettingsChanged(object? sender, PropertyChangedEventArgs args)
     {
+        if (args.PropertyName == nameof(AppSettings.SourceLanguage) || _loadingSettings) OnPropertyChanged(nameof(DefaultSourceLanguage));
         if (args.PropertyName == nameof(AppSettings.Provider))
         {
             LoadProfile(); OnPropertyChanged(nameof(AvailablePresets)); OnPropertyChanged(nameof(ProviderIndex)); OnPropertyChanged(nameof(IsLocal)); OnPropertyChanged(nameof(IsCloud)); OnPropertyChanged(nameof(IsDeepSeek)); OnPropertyChanged(nameof(IsCompatible));
@@ -185,6 +205,14 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     [RelayCommand] private void ShowWorkspace() => Page = AppPage.Workspace;
     [RelayCommand] private void ShowSettings() => Page = AppPage.Settings;
     [RelayCommand] private void ShowLogs() => Page = AppPage.Logs;
+    [RelayCommand(CanExecute = nameof(CanCopyLogs))]
+    private async Task CopyLogsAsync()
+    {
+        try { await _dialogs.CopyTextAsync(string.Join(Environment.NewLine, LogSelection.SelectedIndexes.Order().Select(index => Log[index]))); }
+        catch (Exception exception) { ReportError(exception); }
+    }
+    [RelayCommand(CanExecute = nameof(HasLogs))]
+    private void SelectAllLogs() => LogSelection.SelectAll();
     [RelayCommand] private void ConfigureSpeech() { SettingsSectionIndex = 0; ShowSettings(); }
     [RelayCommand] private void ConfigureTranslation() { if (CanConfigure) ProviderIndex = TaskProviderIndex; SettingsSectionIndex = 1; ShowSettings(); }
     [RelayCommand] private void ConfigurePrompt() { if (CanConfigure) ProviderIndex = TaskProviderIndex; SettingsSectionIndex = 2; ShowSettings(); }
@@ -192,7 +220,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     [RelayCommand(CanExecute = nameof(CanGoToOptions))] private void OptionsStep() => Step = WorkflowStep.Options;
     [RelayCommand(CanExecute = nameof(CanGoToResults))] private void ResultsStep() => Step = WorkflowStep.Results;
     [RelayCommand(CanExecute = nameof(CanStartNew))] private void NewTask() { InputPath = ""; ApplyTaskDefaults(); }
-    private void ApplyTaskDefaults() { TaskProviderIndex = (int)_savedSettings.Provider; TaskSourceCode = _savedSettings.SourceCode; TaskSourceLanguage = _savedSettings.SourceLanguage; TaskTargetLanguage = _savedSettings.TargetLanguage; }
+    private void ApplyTaskDefaults() { TaskProviderIndex = (int)_savedSettings.Provider; TaskSourceLanguage = _savedSettings.SourceLanguage; TaskTargetLanguage = _savedSettings.TargetLanguage; }
     [RelayCommand(CanExecute = nameof(CanRun))]
     private Task NextStepAsync() => ExecuteAsync(async token =>
     {

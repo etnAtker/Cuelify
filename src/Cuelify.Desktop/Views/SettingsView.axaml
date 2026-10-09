@@ -19,8 +19,6 @@
               <StackPanel Spacing="8">
                 <TextBlock Text="语音识别模型" />
                 <TextBox Text="{Binding Settings.AsrModel}" AutomationProperties.Name="语音识别模型" />
-                <TextBlock Text="识别语言代码（留空自动识别）" />
-                <TextBox Text="{Binding Settings.SourceCode}" AutomationProperties.Name="识别语言代码（留空自动识别）" />
                 <TextBlock Text="FFmpeg 路径" />
                 <TextBox Text="{Binding Settings.FfmpegPath}" AutomationProperties.Name="FFmpeg 路径" />
                 <TextBlock Text="ffprobe 路径" />
@@ -35,6 +33,9 @@
                 <NumericUpDown Value="{Binding Settings.ChunkSearchSeconds}" Minimum="0" Maximum="300" AutomationProperties.Name="切点前后搜索时长 / 秒" />
                 <TextBlock Text="音频片段重叠时长 / 毫秒" />
                 <NumericUpDown Value="{Binding Settings.OverlapMs}" Minimum="0" Maximum="1000" AutomationProperties.Name="音频片段重叠时长 / 毫秒" />
+                <TextBlock Text="零时长字幕合并间隔 / 毫秒" />
+                <NumericUpDown Value="{Binding Settings.ZeroDurationToleranceMs}" Minimum="1" Maximum="7000" Increment="100" AutomationProperties.Name="零时长字幕合并间隔 / 毫秒" />
+                <TextBlock Classes="muted" Text="在此间隔内与相邻文本合并；没有相邻文本时，以此时长单独显示。" />
                 <TextBlock Text="语音检测阈值" />
                 <NumericUpDown Value="{Binding Settings.VadThreshold}" Minimum="0.01" Maximum="1" Increment="0.05" AutomationProperties.Name="语音检测阈值" />
                 <TextBlock Text="最短语音 / 毫秒" />
@@ -89,8 +90,6 @@
             <TextBlock Classes="muted" Text="{Binding EngineTestHint}" />
             <Expander Header="翻译高级参数">
               <StackPanel Spacing="8">
-                <TextBlock Text="原文语言" />
-                <TextBox Text="{Binding Settings.SourceLanguage}" AutomationProperties.Name="原文语言" />
                 <TextBlock Text="译文风格" />
                 <TextBox Text="{Binding Settings.TargetStyle}" AutomationProperties.Name="译文风格" />
                 <TextBlock Text="超时 / 秒" />
@@ -167,9 +166,11 @@
             <ComboBox AutomationProperties.Name="外观主题" ItemsSource="{Binding ThemeNames}" SelectedItem="{Binding Settings.Theme}" HorizontalAlignment="Stretch" />
             <CheckBox Content="减少动画" IsChecked="{Binding Settings.ReduceMotion}" />
             <TextBlock Classes="section" Text="新任务的默认选项" />
+            <TextBlock Text="源语言" />
+            <ComboBox SelectedItem="{Binding DefaultSourceLanguage}" ItemsSource="{Binding SourceLanguageNames}" HorizontalAlignment="Stretch" AutomationProperties.Name="默认源语言" />
             <TextBlock Text="目标语言" />
             <TextBox Text="{Binding Settings.TargetLanguage}" AutomationProperties.Name="默认目标语言" />
-            <TextBlock Classes="muted" Text="语音识别和翻译服务页面中的语言及引擎也作为新任务的默认选项。" />
+            <TextBlock Classes="muted" Text="新任务会使用这些语言，也可在第二步直接调整。翻译引擎默认使用翻译服务页保存的选择。" />
           </StackPanel>
         </ScrollViewer>
       </TabItem>

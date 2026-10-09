@@ -104,9 +104,21 @@ public sealed class ElevenLabsAsrTests
     [InlineData("{invalid")]
     [InlineData("{\"transcripts\":[]}")]
     [InlineData("{\"words\":[{\"type\":\"word\",\"text\":\"hi\",\"start\":-1,\"end\":1}]}")]
-    [InlineData("{\"words\":[{\"type\":\"word\",\"text\":\"hi\",\"start\":1,\"end\":1}]}")]
     [InlineData("{\"words\":[{\"type\":\"word\",\"text\":\"hi\",\"start\":2,\"end\":1}]}")]
     public void RejectsMalformedResponsesAndInvalidTimestamps(string json) => Assert.Throws<InvalidDataException>(() => ElevenLabsTranscriptParser.Parse(json));
+
+    [Fact]
+    public void PreservesZeroDurationWordsForCueMerging()
+    {
+        var result = ElevenLabsTranscriptParser.Parse("""
+            {"language_code":"jpn","words":[
+              {"type":"word","text":"你","start":1,"end":1},
+              {"type":"word","text":"吃饭了吗","start":1,"end":2.5}]}
+            """);
+        Assert.Equal(2, result.Words.Count);
+        Assert.Equal(result.Words[0].Start, result.Words[0].End);
+        Assert.Equal("你", result.Words[0].Text);
+    }
 
     [Fact]
     public async Task CancellationPropagatesToHttpHandler()

@@ -47,6 +47,8 @@ Core 定义领域模型、接口和纯逻辑，不引用 Avalonia 或 Infrastruc
 
 词响应使用片段起点还原全局时间，再按时间与文本处理重叠。`CueBuilder` 完成分句；翻译层接收稳定 cue。Desktop 使用临时原文 SRT 承接识别编排，结束后清除临时输出，保留有效缓存；用户最终导出走严格译文序列化。
 
+词解析和全局时间转换接受起止时间相同的词；原始词缓存不加人工时长。`CueBuilderOptions.ZeroDurationTolerance` 控制零时长文本的相邻合并及孤立字幕显示时长，默认 500 毫秒，桌面保存为 `ZeroDurationToleranceMs`。改变该值重新组装 cue，复用 ASR 分片缓存；翻译缓存仍由新 cue 内容和时间确定。
+
 ## 翻译流程
 
 ```text
@@ -73,13 +75,17 @@ Core 定义领域模型、接口和纯逻辑，不引用 Avalonia 或 Infrastruc
 | `Page` / `Step` | 页面导航与三步位置；与业务进度分开 |
 | `Settings`、提示词编辑字段 | 设置页草稿；编辑本身不改变已有结果 |
 | `_savedSettings` | 最后成功保存的非敏感配置快照 |
-| `TaskSourceCode/Language`、`TaskTargetLanguage`、`TaskProviderIndex` | 工作台本次任务选项，默认值来自已保存设置 |
+| `TaskSourceLanguage`、`TaskTargetLanguage`、`TaskProviderIndex` | 工作台本次任务选项，默认值来自已保存设置；源语言同时映射识别代码与翻译名称 |
 | `_jobSettings`、`_jobInputPath` | 实际任务启动时的配置和文件，结果预览、重翻及导出依据 |
 | `Rows` / `SelectedCue` | 字幕和选择；区分等待、翻译中、失败、取消，原文和时间保持稳定 |
 | `IsBusy` / `_isMediaJob` / cancellation | 串行保护长操作，区分媒体处理与服务测试 |
 | `ElevenLabsKey` / `TranslationKey` | 仅窗口会话与启动进程环境，非 AppSettings 成员 |
 
 任务启动从已保存配置复制，再覆盖本次选项。保存设置只更新默认配置，未保存的修改不进入媒体处理请求。服务测试是设置页的显式动作，校验并使用当前设置草稿；它不改变已完成任务状态或导出资格。
+
+`SpeechLanguages` 维护 Scribe v2 官方语言名称与 ISO 639-1/639-3 映射。界面只显示中文源语言名称，区域标识兼容输入会转为语言代码；旧 JSON 加载时以原 ASR 代码统一源语言，并保留已有合法两位/三位代码维持识别缓存身份。未选定源语言时省略 `language_code`。未知语言在上传前拒绝。
+
+日志通过 Avalonia `SelectionModel<string>` 按行索引选择，复制命令按原顺序拼接完整条目，避免相同文本的未选行被误复制；`WindowDialogs` 封装窗口剪贴板写入。
 
 单条重翻和请求预览使用原任务配置；导出命名使用原任务目标语言。更换输入清除旧任务和结果；新建任务回到第一步并载入已保存默认值。调整选项后重新处理才生成另一份配置对应的结果。配置正确且初始化完成后，命令按状态启用；处理中允许导航，相关编辑和步骤切换锁定。
 

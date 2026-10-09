@@ -52,6 +52,7 @@ public partial class AppSettings : ObservableObject
     [ObservableProperty] private int minimumSpeechMs = 250;
     [ObservableProperty] private int minimumSilenceMs = 400;
     [ObservableProperty] private int overlapMs = 250;
+    [ObservableProperty] private int zeroDurationToleranceMs = 500;
     [ObservableProperty] private long maximumUploadBytes = 2_900_000_000;
     [ObservableProperty] private string theme = "系统";
     [ObservableProperty] private bool reduceMotion = true;

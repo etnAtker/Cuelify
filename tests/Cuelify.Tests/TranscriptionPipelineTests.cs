@@ -44,6 +44,24 @@ public sealed class TranscriptionPipelineTests
     private static TranscriptionPipeline Pipeline(TestDirectory directory, FakeVad vad, FakeAsr asr, string model = "scribe_v2") =>
         new(NativeMediaTests.Processor(), vad, asr, "fake-vad", new() { ModelId = model }, directory.File("cache"));
 
+    [Fact]
+    public async Task ZeroDurationToleranceRerendersCuesWithoutRepeatingPaidRecognition()
+    {
+        using var directory = new TestDirectory();
+        var input = await NativeMediaTests.Fixture(directory, duration: 1);
+        var asr = new FakeAsr { Behavior = (_, _, _) => Task.FromResult(new AsrTranscript("zho",
+            [new("你", TimeSpan.FromSeconds(.1), TimeSpan.FromSeconds(.1), null),
+             new("好", TimeSpan.FromSeconds(.5), TimeSpan.FromSeconds(.9), null)])) };
+        var pipeline = Pipeline(directory, new(), asr);
+        var first = await pipeline.RunAsync(input, directory.File("first.srt"), Options);
+        Assert.Single(first.Cues); Assert.Equal("你好", first.Cues[0].SourceText);
+        var second = await pipeline.RunAsync(input, directory.File("second.srt"), Options with
+            { Cues = new() { ZeroDurationTolerance = TimeSpan.FromMilliseconds(200) } });
+        Assert.Equal(2, second.Cues.Count); Assert.Equal(TimeSpan.FromSeconds(.3), second.Cues[0].End);
+        Assert.Equal(0, second.AsrRequests); Assert.Equal(first.Chunks.Count, second.CacheHits);
+        Assert.Equal(first.Words, second.Words);
+    }
+
     [Theory]
     [InlineData("wav")] [InlineData("mp3")] [InlineData("mp4")]
     public async Task NativeMediaToSrtWithFakeAsrSupportsCacheAndCueRerender(string extension)
