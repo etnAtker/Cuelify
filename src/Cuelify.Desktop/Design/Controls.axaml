@@ -13,6 +13,8 @@
   <Style Selector="TextBox"><Setter Property="MinHeight" Value="36" /></Style>
   <Style Selector="Button"><Setter Property="MinHeight" Value="36" /></Style>
   <Style Selector="Button.prompt-variable">
+    <Setter Property="ToolTip.ShowDelay" Value="200" />
+    <Setter Property="ToolTip.Placement" Value="Bottom" />
     <Setter Property="Padding" Value="8,4" />
     <Setter Property="Background" Value="{DynamicResource Brush.Surface}" />
     <Setter Property="Foreground" Value="{DynamicResource Brush.Text}" />

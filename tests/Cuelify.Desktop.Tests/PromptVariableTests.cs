@@ -34,6 +34,7 @@ public sealed class PromptVariableTests
         using (var frame = window.CaptureRenderedFrame()) Assert.NotNull(frame);
         var buttons = list.GetVisualDescendants().OfType<Button>().ToArray();
         Assert.Equal(PromptBuilder.Variables, buttons.Select(button => Assert.IsType<PromptVariableItem>(button.DataContext).Name));
+        Assert.All(buttons, button => Assert.False(ToolTip.GetIsOpen(button)));
         foreach (var button in buttons)
         {
             var variable = Assert.IsType<PromptVariableItem>(button.DataContext);
@@ -42,16 +43,19 @@ public sealed class PromptVariableTests
             Assert.Equal(variable.Description, AutomationProperties.GetHelpText(button));
             Assert.Equal(variable.CopyLabel, AutomationProperties.GetName(button));
             Assert.Equal(variable.Placeholder, Assert.IsType<TextBlock>(button.Content).Text);
+            Assert.Equal(200, ToolTip.GetShowDelay(button)); Assert.Equal(PlacementMode.Bottom, ToolTip.GetPlacement(button));
             Assert.True(button.Bounds.Width > 0);
             var position = button.TranslatePoint(default, list)!.Value;
             Assert.InRange(position.X + button.Bounds.Width, 0, list.Bounds.Width + 1);
         }
+        Assert.True(buttons[1].Focus()); Assert.False(ToolTip.GetIsOpen(buttons[1]));
         var target = buttons[0]; target.BringIntoView(); Assert.True(target.Focus(NavigationMethod.Pointer));
         await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => { }, Avalonia.Threading.DispatcherPriority.Background);
         using (var frame = window.CaptureRenderedFrame()) Assert.NotNull(frame);
         var popup = TopLevel.GetTopLevel(target)!;
         var point = target.TranslatePoint(new Point(8, 8), popup)!.Value;
-        ToolTip.SetShowDelay(target, 0); popup.MouseMove(point);
+        popup.MouseMove(point); Assert.False(ToolTip.GetIsOpen(target));
+        await Task.Delay(300);
         await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => { }, Avalonia.Threading.DispatcherPriority.Background);
         Assert.True(ToolTip.GetIsOpen(target));
         ToolTip.SetIsOpen(target, false);
@@ -67,6 +71,7 @@ public sealed class PromptVariableTests
         popup.KeyPress(Key.Escape, RawInputModifiers.None, PhysicalKey.Escape, null); Assert.False(ToolTip.GetIsOpen(buttons[2]));
         launcher.Flyout.Hide(); launcher.Flyout.ShowAt(launcher);
         await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => { }, Avalonia.Threading.DispatcherPriority.Background);
+        Assert.All(buttons, button => Assert.False(ToolTip.GetIsOpen(button)));
         var output = Environment.GetEnvironmentVariable("CUELIFY_UI_ARTIFACTS");
         if (!string.IsNullOrWhiteSpace(output))
         {

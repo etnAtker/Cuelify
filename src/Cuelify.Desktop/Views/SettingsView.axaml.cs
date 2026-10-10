@@ -17,7 +17,11 @@ public partial class SettingsView : UserControl
             list.SetCurrentValue(SelectingItemsControl.SelectedItemProperty, model.VisibleSelectedPrompt);
     }
     private void OnPromptVariableGotFocus(object? sender, GotFocusEventArgs args)
-    { if (sender is Button button && args.NavigationMethod != NavigationMethod.Pointer) ToolTip.SetIsOpen(button, true); }
+    {
+        // 浮层会自动聚焦第一个变量，仅真正的键盘导航主动显示说明。
+        if (sender is Button button && args.NavigationMethod is NavigationMethod.Tab or NavigationMethod.Directional)
+            ToolTip.SetIsOpen(button, true);
+    }
     private void OnPromptVariableLostFocus(object? sender, RoutedEventArgs args)
     { if (sender is Button button) ToolTip.SetIsOpen(button, false); }
     private void OnPromptVariableKeyDown(object? sender, KeyEventArgs args)
