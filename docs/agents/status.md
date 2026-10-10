@@ -10,7 +10,87 @@
 
 维护者已指定自有代码与文档使用 [MIT 许可证](../../LICENSE)，Copyright (c) 2026 etnAtker；发行包包含项目许可证并保留第三方声明，见 D010。项目许可选择不代表所有原生间接组件的发行义务已经完成核验。
 
-## 本轮各模型独立提示词验证
+## 本轮移除模型校验与服务复用验证
+
+2026-10-10，按批准的 D018 移除手动选择和运行前的模型 SHA、GGUF 文件头及架构/量化校验。手动选择不再联网查询官方文件身份，任意可读文件均可记录；预设 ID 仍用于设置默认值与提示词关联，不证明文件身份。下载完整性校验保持。模型缓存版本仅含路径、大小和修改时间，历史配置哈希不参与运行判断；旧缓存保留，但新本地缓存协议与旧身份隔离。
+
+生产 `DesktopJobService` 先比较运行配置和文件版本，再查询已有服务的轻量健康接口；同配置、同版本且可用时直接复用，不重复运行包能力检查或模型加载。准备状态不再包含模型校验，复用时明确显示正在复用本地服务；加载失败保留 llama.cpp 原始诊断，经既有脱敏后写入日志。取消、超时、文件句柄及子进程释放保持。
+
+Windows 原生 Release 普通自动化：Core/Infrastructure 221 项通过、4 项 GPU 门控跳过，Desktop 115 项通过、1 项真实服务门控跳过，均零失败。覆盖文件版本隔离与缓存复用、不读取占用中的模型字节、离线手动选择非 GGUF 文件、无效历史 SHA 不作门禁、加载失败提示及诊断脱敏。TRX 位于忽略目录 `artifacts/model-loading/tests/`。
+
+另显式执行 3 项真实 Vulkan 用例，全部通过：正常模型冷启动/复用并实际生成；损坏模型启动 llama.cpp 后收到真实加载错误并释放进程和文件；正式桌面服务工厂跨准备、测试翻译和请求预览复用同一已加载服务，修改历史 SHA 也不重新加载。使用已有 1.8B Q6_K 与 b11540 官方 Vulkan 运行包，RTX 4070 Laptop GPU 实际卸载 33/33 层，GPU 模型缓冲 1401.61 MiB。共 2 次新短句生成、零缓存命中；正常生成测试检查 EOS。证据在 `artifacts/model-loading/gpu/preparation-evidence.json`、`desktop-service-evidence.json`、`damaged-model-server.log` 及对应 TRX。没有重新下载模型/运行包、付费线上或 ASR 调用、改写用户现用设置/凭证，也未进行 7B、发行或原生 GUI/DPI 人工验收。
+
+损坏模型的诊断收集边界调整后，定向真实用例再次通过，记录为 `damaged-model-final.trx`；不产生新的成功生成。最终 `git diff --check` 通过。
+
+## 上一轮准备反馈与推理参数统一验证
+
+以下是上一轮历史证据，其中模型完整性校验和复用显示已就绪的描述已由本轮 D018 替代。
+
+2026-10-10，工作台检查媒体与开始处理前的准备，以及设置页翻译测试，已在固定操作区显示真实阶段、等待指示和已用时间；日志记录开始、完成、取消/失败及耗时。llama-server 冷启动上报运行包/模型检查、进程启动、模型加载、容量/GPU 检查与就绪，运行中的同一会话只上报就绪。移除工作台额外的整文件 SHA 校验，服务工厂与启动会话仍执行完整性检查。阶段通知通过 UI dispatcher 排空后移交识别或最终测试结果，取消/关闭停止计时，陈旧通知不覆盖后续状态。
+
+翻译服务页统一推理参数的位置、中文名称、token/秒单位和数值输入，保留本地/线上各自的并发及输出值、原默认值和 schema 2。线上输出可留空；本地输出上限随模型上下文半容量变化，缩小容量同步降低超出的输出值。参考上下文与本地模型上下文名称区分，专属参数保持按引擎显示。
+
+本轮 Windows 原生 Release 桌面测试 113 项通过（新增 9 项），覆盖两类参数切换/保存、清空线上输出、上下文联动、准备显示与取消/失败后重试/关闭、阶段通知和最终状态保持。核心/基础设施普通测试 223 项通过、3 项 GPU 门控跳过；其中新增真实准备验证已单独显式执行并通过，使用现有官方 1.8B Q6_K 与 b11540 Vulkan 运行包，冷启动阶段顺序正确，第二次准备复用同一 PID，一次新短句生成成功、5 token、EOS、零缓存、33/33 层 GPU 卸载并释放进程。未新增付费线上请求或 ASR 调用，未重新进行 7B、发行或原生 GUI/DPI 人工验收。
+
+TRX 与真实 GPU 证据在 `artifacts/inference-ui/tests/`、`artifacts/inference-ui/gpu/`；headless 浅色 1240×860、深色 900×640 截图在 `artifacts/inference-ui/screenshots/`，已检查固定反馈区、按钮与参数区布局。截图及桌面业务替身不代表原生 GUI 或真实媒体端到端验收。
+
+## 变量说明焦点修复验证
+
+2026-10-10，用户反馈点击变量说明后，第一个变量的解释立刻出现在屏幕左上角，悬停正常。真实 headless XAML 在浅色 1240×860、深色 900×640 都复现浮层打开即开启第一个变量的 ToolTip，修复前 TRX 为 variable-focus-before-fix.trx，2 项失败。核对 Avalonia 11.3.12 的 PopupFlyoutBase 和 InputElement 源码：标准浮层会主动调用 Focus()，其默认导航来源是 Unspecified；原应用把所有非 Pointer 来源当作键盘导航而立即开启说明。ToolTip 默认 Pointer 定位与截图现象相符，但屏幕左上角的原生坐标未在 headless 中复验。
+
+修复为仅 Tab/Directional 聚焦主动显示说明，忽略程序自动聚焦；Button.prompt-variable 的共享样式将说明锚定按钮下方，并把悬停 ShowDelay 从框架默认 400 毫秒缩短为 200 毫秒，其他控件不改。执行 `dotnet test tests/Cuelify.Desktop.Tests/Cuelify.Desktop.Tests.csproj -c Release --no-restore --filter FullyQualifiedName~PromptVariableTests --logger 'trx;LogFileName=variable-focus-final.trx'`，3 项通过，零失败/跳过，编译零警告/零错误。覆盖真实鼠标点击打开浮层后全部说明关闭、程序聚焦不弹说明、实际悬停计时、按钮锚点、Tab/方向键、鼠标与 Enter 复制、Escape、关闭后再打开及复制失败重试；截图位于忽略目录 artifacts/variable-focus-fix/。
+
+本轮仅修改焦点处理和变量样式，采用定向回归，没有重复上一轮桌面全量测试、真实 GPU 或付费服务验证。用户现用 Rider 实例、配置与凭证未改；Windows 原生弹窗位置及人工体验仍需重新构建后复验。最终 `git diff --check` 通过。
+
+## 上一轮提示词页面与切换确认验证
+
+2026-10-10，按用户批准重排提示词页：左侧保留搜索/分类/列表，右侧固定工具栏及正文、模板设置、提示词预览三个页签，底部只保留一个保存设置入口。变量说明改为就近浮层，正文不被说明挤占；进入预览页签使用当前草稿渲染样例，分开显示系统与用户消息并支持复制，不调用推理服务。模型使用情况移入模板设置的辅助区，区分默认使用与显式指定，不作为独立“模型关联”页签。
+
+未保存切换先拒绝并恢复原列表高亮，弹模态框询问保存并切换、放弃并切换或取消；新建/复制共用这套保护。保存使用配置快照，磁盘写入成功后才更新模板库和清除编辑状态；校验或写入失败保持草稿和原选择。未保存自定义模板可确认删除，仅移除草稿；删除已保存模板时提示被引用模型将恢复各自默认提示词，确认后原子移除模板及相关显式关联。本轮用户明确调整了上一轮手选替代模板的规则，线上、1.8B、7B 各自默认值保持。
+
+执行 `dotnet test tests/Cuelify.Desktop.Tests/Cuelify.Desktop.Tests.csproj -c Release --no-restore --logger 'trx;LogFileName=prompt-ui-desktop-final.trx'`，104 项通过，零失败/跳过，编译零警告/零错误。覆盖真实 XAML 模态框三种结果及所属窗口、等待弹框时原选择高亮、取消/保存/放弃、校验和磁盘写入失败保留草稿、新建/复制的切换保护、未保存模板删除不写配置、已引用删除按模型恢复默认、预览草稿与错误/复制状态、变量鼠标/键盘说明与复制、已有任务快照。测试组件为 headless 或服务替身；窗口模态的原生输入拦截仍需人工验收。
+
+检查浅色 1240×860、深色 900×640 的正文、设置、预览截图，位于忽略目录 artifacts/prompt-ui-redesign/；正文区域没有遮挡固定保存按钮，列表与操作正常。初轮真实 XAML 暴露了取消后高亮未恢复，以及变量说明折叠后旧测试没有展开的问题，已修正并由最终全量回归覆盖。没有启动或修改用户现用 Rider 实例、配置或凭证，没有新增付费 API、GPU 推理、模型/运行包下载或发行验收；推理路径未改变，本轮没有重复上一轮 GPU 验收。最终静态检查以本轮 `git diff --check` 为准。
+
+## 上一轮独立提示词库与批量推理验证
+
+2026-10-10，按用户批准的 D017 分离提示词管理与模型设置，内置仅保留「通用字幕批量翻译」「简单单条翻译」「上下文单条翻译」，去掉简洁字幕批量模板。内置只读，自定义支持新建、复制、搜索、编辑和删除；模型仅关联模板 ID，多个模型可共用模板，删除已引用模板必须指定替代。编辑器切换保留未保存草稿并提供保存、放弃或取消；模型切换不切换编辑草稿。样例预览只渲染正文，不调用推理服务。
+
+批量属性、每批条数和字符上限归模板管理，兼容 API、DeepSeek、本地 llama-server 均可执行单条纯文本或批量 ID JSON。补翻继续使用原模板和输出协议，本地超出分词预算时先裁剪参考，再拆小批次；单条仍超限则明确失败。缓存身份排除模板名称、说明及 ID，正文或执行模式改变才影响翻译结果缓存。已完成任务保留模板快照。线上默认并发仍为 4，本地为 2。
+
+settings.json 使用 schema 2，按用户要求不迁移旧配置：首次读取旧版设置先保存同目录 settings.previous-*.json，再原子写入新版默认设置，需重新配置模型与服务；凭证、GGUF、运行包和缓存文件保留。损坏或未来版本配置不覆盖。旧 1.8B Q4_K_M 兼容选项移除，列表只含两个当前预设。下文 D015、D016 阶段的配置迁移与旧选项测试仅为历史证据，已由 D017 的新契约替代。本轮没有加载或改写用户现用设置和凭证，配置重置仅在测试夹具中验证，实际行为发生在下一次新版启动。
+
+最终执行 `dotnet test tests/Cuelify.Tests/Cuelify.Tests.csproj -c Release --no-restore --logger 'trx;LogFileName=prompt-refactor-core-final.trx'`，Core/Infrastructure 223 项通过、2 项真实 GPU 门禁用例跳过、零失败；执行 `dotnet test tests/Cuelify.Desktop.Tests/Cuelify.Desktop.Tests.csproj -c Release --no-restore --logger 'trx;LogFileName=prompt-refactor-desktop-final.trx'`，Desktop 94 项通过，零失败/跳过。共 317 项普通自动化通过，测试编译零警告/零错误。覆盖三个生产后端与两种请求模式、部分成功仅补失败 ID、容量拆批、缓存身份、库与关联持久化、旧版备份重置、损坏/未来版本保护、草稿切换、删除替代及已完成任务快照。线上传输与桌面业务使用测试替身，本轮没有新增付费服务调用。
+
+另执行 `FullyQualifiedName~IndependentTemplatesRunSingleContextAndBatchOnRealVulkan` 定向真实 GPU 验收，1 项通过，TRX 为 prompt-refactor-gpu.trx。使用已有完整官方 Vulkan 运行包，版本 `0.6.0-dev (build 11540, commit 1e6f04a75)`，只读已有 Hy-MT2-1.8B Q6_K（SHA-256 `d98fe604dec1f28f58f80d7d560f7177e584d3b8e5835862687660e5ff97cb40`）。三个内置模板共 5 次实际生成、0 次缓存命中，其中批量模板一次请求完成两条字幕且未补翻；均正常 EOS，保留 cue ID 和时码。RTX 4070 Laptop GPU 实际 Vulkan 卸载 33/33 层，模型 GPU 缓冲 1401.61 MiB，关闭后服务进程已退出。证据在忽略目录 artifacts/prompt-refactor/gpu/template-evidence.json、template-server.log；运行命令和环境变量见[开发指南](../development.md)。7B 未在本轮实际生成验收。
+
+真实 headless XAML 覆盖浅色 1240×860、深色 900×640 的列表选择、筛选清除恢复选中、只读模板、自定义编辑与复制、草稿切换和模型列表稳定性，截图位于忽略目录 artifacts/prompt-refactor/ui/，已检查布局。没有进行 Rider 原生人工交互、DPI、原生剪贴板或本轮发行验收。最终 `git diff --check` 通过。
+
+## 上一轮独立 llama.cpp 与并发验证
+
+2026-10-10，按用户批准的 D016 将进程内 LLamaSharp 替换为应用按需管理的 llama-server 子进程，界面统一为「本地模型」。增加官方 Windows x64 Vulkan 运行包下载、取消/续传、SHA-256 校验、安全解压及手动程序检查；版本安装到设置目录的 `llama.cpp/<tag>-<digest-prefix>/`，旧版本保留。模型预设、下载、独立提示词和已完成任务快照保持；新后端缓存身份独立，识别缓存不受影响。本地默认并发 2，云端默认并发 4，范围均为 1～8，旧配置的显式云端值保留。
+
+执行 `dotnet restore Cuelify.slnx --locked-mode` 通过。最终全量 `dotnet test Cuelify.slnx -c Release --no-restore --logger 'trx;LogFileName=llama-final.trx'` 中 Core/Infrastructure 211 项、Desktop 83 项通过；真实 GPU 用例完成生成、取消及释放后因旧 `server.log` 不允许覆盖而失败。修正仅该验收产物覆盖设置，执行同配置的 `FullyQualifiedName~LocalGpuAcceptanceTests` 定向复验，1 项通过；合计 295 项全部覆盖通过，无未修复失败。全量与复验 TRX 分别为 `llama-final.trx`、`llama-gpu-final.trx`，位于各测试项目忽略的 `TestResults/`。
+
+自动化覆盖运行程序接口与 Vulkan 检查、GGUF 架构/量化及模型句柄释放、并发 slot、超时/取消/关闭、最终模板与分词预算、SSE 完整生成校验、稳定波次上下文、缓存身份和字幕对齐；下载覆盖滚动版本选择、官方许可、续传、坏哈希、越界路径及旧版本保护。桌面覆盖默认值和旧设置迁移、手动选择、下载草稿与任务快照、占用/导航/取消/关闭、下载失败及明暗真实 XAML。下载 HTTP 与桌面业务用例使用测试替身，不能代替实际 GPU 或人工 GUI 验收。
+
+通过生产 `LlamaPackageService` 实际下载本次官方滚动 Vulkan 包，最终复验版本 `0.6.0-dev (build 11540, commit 1e6f04a75)`。使用已有 Hy-MT2-1.8B Q6_K（SHA-256 `d98fe604dec1f28f58f80d7d560f7177e584d3b8e5835862687660e5ff97cb40`），经新生产引擎与编排器双并发翻译 4 条字幕，0 次缓存命中，均非零生成并正常 EOS。RTX 4070 Laptop GPU 实际 Vulkan 卸载 33/33 层，模型 GPU 缓冲 1401.61 MiB；实际模板预览 42 token。另在长请求生成至少 2 token 时取消，同一进程随后成功生成，关闭后子进程不存在。证据位于忽略目录 `artifacts/local-acceptance/evidence.json`、`server.log`。本次仅使用测试目录安装运行包和只读已有模型，没有保存或覆盖用户现用设置/凭证；7B 和旧 1.8B Q4_K_M 未在新后端实际生成验收，旧后端历史证据不等于新后端验证。
+
+顺序执行自包含 Windows x64 `dotnet publish` 及 `scripts/Verify-Release.ps1`，发行资产、包内 .NET 运行时、原生主窗口创建和正常退出检查通过，证据在 `artifacts/validation/llama-release.json`；发行包不携带 LLamaSharp、llama.cpp 或 GGUF。首次发行构建与测试并发写入同一构建目录导致 PDB 占用，测试结束后顺序重跑已解决。运行包对应 tag 的 llama.cpp LICENSE 随下载保留，发行锁文件与第三方声明已更新。Headless 浅色 1240×860、深色 900×640 截图在 `artifacts/ui/llama-runtime-*.png`，已检查布局；尚未完成独立无 SDK 机器、原生交互/DPI、父进程异常终止的人工验收。没有新增 ElevenLabs、兼容 API 或 DeepSeek 真实调用，也没有开展跨平台发行验收。
+
+### 本地翻译测试的模板校验修复
+
+2026-10-10，用户在 Rider 运行时反馈默认本地模板包含 `{source_text}`，测试仍报告缺少该变量。默认模板、首次加载、真实 XAML 引擎/模型及页签切换的新增用例未复现默认内容丢失；随后用「当前本地默认有效、未选本地或兼容服务模板无效」的夹具，稳定复现相同错误。原因是测试入口复用了全配置的模板校验；未选模板的错误没有标明归属。
+
+测试入口改为仅校验当前引擎/模型的提示词，当前模板缺少变量仍在调用服务前拒绝；保存与加载配置继续完整校验，错误标明具体引擎或模型。没有自动改写自定义模板或用户配置。执行 Desktop 全量 `dotnet test tests/Cuelify.Desktop.Tests/Cuelify.Desktop.Tests.csproj -c Release --no-restore --logger 'trx;LogFileName=local-prompt-desktop-final.trx'`，94 项通过，零失败/跳过；覆盖未选模板隔离、当前非法模板拒绝、云端反向隔离、默认 XAML 切换和原任务快照。此前故障复现 TRX 为 `inactive-prompt-repro.trx`，其中 2 项在修复前失败，修复后已覆盖通过。服务调用使用测试替身，本轮没有新增付费云端或实际 GPU 调用；用户当前运行实例中的具体异常模板尚待 Rider 重新构建后确认，不能把夹具复现当作读取其实际运行内存的证据。
+
+### 旧 1.8B Q4_K_M 下拉选择修复
+
+2026-10-10，用户反馈点击旧 Q4_K_M 选项后崩溃，Rider 控制台堆栈重复过长。真实 XAML 旧配置夹具确认：刷新模型列表会重新生成数组并重置下拉选择，一次用户选择触发重复配置写入，产生选择回退；初始化时也可能显示 Q6_K 而配置仍为旧 Q4_K_M。修复为共用稳定 `ObservableCollection`、按需增删旧配置选项，切换期间拒绝重入回写。保留旧模型路径、哈希及自定义模板，没有删除模型、迁移用户现用文件或更改推理服务。
+
+服务页与提示词页分别覆盖旧模型初始选中、Q6_K 初始选中但保留旧模型配置两种情况，检查首次显示、四次往返切换仅产生四次配置变化，以及保存/重载后的路径、哈希和模板。修复前夹具失败记录为 `legacy-selection-before-fix.trx`，最终执行 `dotnet test tests/Cuelify.Desktop.Tests/Cuelify.Desktop.Tests.csproj -c Release --no-restore --logger 'trx;LogFileName=legacy-selection-desktop-final.trx'`，Desktop 98 项通过，零失败/跳过。测试使用 headless XAML 和配置夹具，不代表已取得用户原生崩溃完整堆栈或完成 Rider 人工复验。本轮没有新增实际模型推理、模型下载或云端调用。
+
+## 上一轮各模型独立提示词验证
 
 2026-10-10，按 D015 将本地模板改为按模型分别保存。1.8B 默认恢复原简单单条模板，7B 默认保留前后文模板；提示词页可切换模型，各自编辑、应用预设和恢复默认。旧共用自定义模板只迁移到原选中模型，旧内置模板使用模型默认值，已开始任务的预览/重翻继续使用原快照。依赖、批次与并发保持原行为。
 
