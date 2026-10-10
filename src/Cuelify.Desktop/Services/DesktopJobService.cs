@@ -94,7 +94,7 @@ public sealed class DesktopJobService(string? root = null) : IDesktopJobService
         if (engine is LocalTranslationEngine prepared) await prepared.WarmupAsync(token, progress);
         progress?.Report(new(LocalPreparationStage.TestingTranslation));
         var response = await engine.TranslateAsync(request, token);
-        var aligned = AlignmentValidator.Parse(response.Content, [cue], settings.GetProfile().OutputFormat, false);
+        var aligned = AlignmentValidator.Parse(response.Content, [cue], settings.GetProfile().OutputFormat);
         if (aligned.FailedIds.Count > 0) throw new InvalidDataException("服务已响应，但译文不完整或格式不正确。请检查提示词后重试。");
         if (engine is LocalTranslationEngine local)
         {

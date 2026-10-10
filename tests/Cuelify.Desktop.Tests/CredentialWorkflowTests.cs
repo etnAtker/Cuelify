@@ -108,7 +108,7 @@ public sealed class CredentialWorkflowTests
         model.ProviderIndex = 1; Assert.Equal("deepseek-secret", model.TranslationKey);
         model.InputPath = "fixture.mp4"; await model.RunCommand.ExecuteAsync(null);
         Assert.Equal("deepseek-secret", fixture.Jobs.TranslationCredential);
-        model.ProviderIndex = 0; model.SelectedCue = model.Rows[0]; await model.RetryCueCommand.ExecuteAsync(null);
+        model.ProviderIndex = 0; model.CueSelection.Clear(); model.CueSelection.Select(0); await model.RetryCueCommand.ExecuteAsync(null);
         Assert.Equal("deepseek-secret", fixture.Jobs.TranslationCredential);
         model.TaskProviderIndex = 0; await model.RunCommand.ExecuteAsync(null);
         Assert.Equal("compatible-secret", fixture.Jobs.TranslationCredential);
@@ -138,7 +138,7 @@ public sealed class CredentialWorkflowTests
         Assert.False(model.ChangeMasterPasswordCommand.CanExecute(null)); Assert.False(model.ResetCredentialsCommand.CanExecute(null));
         model.LockCredentialsCommand.Execute(null); Assert.True(model.IsUnlocked);
         fixture.Jobs.ReleaseTranslation.TrySetResult(); await run;
-        model.SelectedCue = model.Rows[0]; model.LockCredentialsCommand.Execute(null);
+        model.CueSelection.Clear(); model.CueSelection.Select(0); model.LockCredentialsCommand.Execute(null);
         Assert.True(model.CanExport); Assert.False(model.CanRetryCue); Assert.Equal(2, model.Rows.Count);
         fixture.Dialogs.SavePath = Path.Combine(fixture.Root, "locked-export.srt"); await model.ExportCommand.ExecuteAsync(null);
         Assert.Contains("中文译文", await File.ReadAllTextAsync(fixture.Dialogs.SavePath));

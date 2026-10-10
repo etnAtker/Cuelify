@@ -65,6 +65,7 @@ Core 定义领域模型、接口和纯逻辑，不引用 Avalonia 或 Infrastruc
 - `LlamaServerSession` 用 `ProcessCommandRunner.CreateStartInfo` 创建无窗口进程，清除继承的 llama.cpp 参数覆盖；只监听 127.0.0.1，通过 `--port 0` 分配端口，关闭 Web UI 和浏览器跨域访问。指定 Vulkan 设备、GPU 卸载层数、slot 数及总上下文长度；禁用自动容量调整和共享 KV 池，核对 `/props` 的每 slot 上下文与容量。GPU 证据仅来自本次进程的模型加载日志，必须具备选定 Vulkan 设备、GPU 模型缓冲及非零层卸载。
 - `PromptBuilder` 统一渲染前文（原文及已有译文）、后文（仅原文）与当前字幕，JSON 保留可读中文；默认前文 5 条、后文 2 条，共享字符预算。`TranslationRequest.PromptContext` 保留模板与参考条目，`EmbeddedPromptBudget.PrepareAsync` 经服务端 `/apply-template` 与 `/tokenize` 使用实际 tokenizer 逐条移除较远参考内容，不截断当前字幕或指令；参考全部移除仍超限时抛出 `PromptCapacityException`；编排器递归拆分批次，直到可执行或单条仍超限并明确失败，不截断/丢弃当前字幕。本地请求预览经同一裁剪和 chat template 返回实际提示词及 token 数；`/completion` 接收这份最终提示词，保证预算和预览与生成一致。
 - 成功译文校验后持久化，每批结束发布 `TranslationProgress` 中的有效 cue 和失败 ID。桌面合并交错通知，不让晚到快照清掉已显示的成功译文。
+- `AlignmentValidator` 统一校验非空文本、允许的控制字符、纯文本/JSON 协议和 ID 对齐；不比较原译文是否相同，也不依赖源目标语言相同的豁免。服务响应、成功缓存和定向重翻恢复旧结果使用同一内容校验，缓存身份及 schema 保持不变，规则决定见 D019。
 - 定向重翻失效选中 ID 的旧缓存，恢复未选中结果；重翻失败或取消不能把该 ID 的旧成功译文重新当作本次结果。
 
 缓存复用、对齐与实际云端参数应以[翻译编排](../../src/Cuelify.Infrastructure/Translation/TranslationOrchestrator.cs)和[云端选项](../../src/Cuelify.Infrastructure/Translation/CloudTranslationOptions.cs)为准；默认值不是服务商永远有效的 API 保证。
@@ -83,7 +84,7 @@ Core 定义领域模型、接口和纯逻辑，不引用 Avalonia 或 Infrastruc
 | `LocalModelId`、`ModelFiles`、`ModelPath`、`ModelSha256` | 选中预设、各模型路径及下载来源哈希、当前路径及下载哈希；手动选择清空哈希，历史哈希不参与运行前校验或缓存身份；保存后进入任务快照 |
 | `PromptLibrary` / `ModelPromptBindings` | 自定义模板库、模型到模板 ID 的关联；内置模板在 Core 中提供，删除时移除对该模板的显式关联，各模型回退自己的默认模板，关联与删除通过同一配置原子保存 |
 | `SelectedPrompt` / 提示词编辑字段 | 独立编辑对象与草稿，不随模型切换；列表筛选选择与实际编辑对象分开，未保存切换先恢复原高亮并等待模态保存/放弃/取消，保存失败保持原草稿 |
-| `Rows` / `SelectedCue` | 字幕和选择；区分等待、翻译中、失败、取消，原文和时间保持稳定 |
+| `Rows` / `CueSelection` | 字幕及 `SelectionModel<CueRow>` 多选；区分等待、翻译中、失败、取消，原文和时间保持稳定；行替换后按 ID 恢复选择，新任务清空选择 |
 | `IsBusy` / `_isMediaJob` / cancellation | 串行保护长操作，区分媒体处理与服务测试 |
 | `IsPreparing` / `PreparationStatus` / `PreparationElapsed` | 本次准备或服务测试的真实阶段与计时；工作台/设置复用固定状态视图，阶段通过 UI dispatcher 更新，完成/取消/关闭后停止计时并拒绝陈旧通知 |
 | `ElevenLabsKey` / `TranslationKey` | 解锁后的编辑字段，翻译字段按当前设置 provider 映射；非 AppSettings 成员 |
@@ -99,7 +100,7 @@ Core 定义领域模型、接口和纯逻辑，不引用 Avalonia 或 Infrastruc
 
 日志通过 Avalonia `SelectionModel<string>` 按行索引选择，复制命令按原顺序拼接完整条目，避免相同文本的未选行被误复制；`WindowDialogs` 封装窗口剪贴板写入。
 
-单条重翻和请求预览使用原任务配置；导出命名使用原任务目标语言。更换输入清除旧任务和结果；新建任务回到第一步并载入已保存默认值。调整选项后重新处理才生成另一份配置对应的结果。配置正确且初始化完成后，命令按状态启用；处理中允许导航，相关编辑和步骤切换锁定。
+重翻所选字幕和请求预览使用原任务配置；导出命名使用原任务目标语言。重翻命令在确认前按显示顺序捕获所选 ID 集合，确认后核对原任务仍有效，复用定向重翻接口，只清除所选译文；单条/多条提示与云端费用按任务快照显示。`TargetedRetry` 映射为重新翻译中并更新行状态，取消/失败正确标记正在请求的条目；有效译文不显示失败样式。更换输入清除旧任务和结果；新建任务回到第一步并载入已保存默认值。调整选项后重新处理才生成另一份配置对应的结果。配置正确且初始化完成后，命令按状态启用；处理中允许导航，相关编辑和步骤切换锁定。
 
 ## 缓存与敏感信息
 

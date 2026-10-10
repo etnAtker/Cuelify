@@ -78,7 +78,7 @@ public sealed class TranslationPromptTests
     [InlineData("解释：{\"cue-1\":\"你好\"}")]
     [InlineData("{\"cue-1\":42}")]
     [InlineData("{\"cue-1\":\" \"}")]
-    [InlineData("{\"cue-1\":\"Hello.\"}")]
+    [InlineData("{\"cue-1\":\"\\u0000\"}")]
     public void InvalidOutputCannotMasqueradeAsSuccessfulTranslation(string output)
     {
         var aligned = AlignmentValidator.Parse(output, [Cue()], TranslationOutputFormat.CueIdJson);
@@ -94,11 +94,31 @@ public sealed class TranslationPromptTests
         Assert.Equal(["b"], result.FailedIds);
     }
 
-    [Fact]
-    public void SameLanguageAndNumbersCanRemainUnchanged()
+    [Theory]
+    [InlineData("我")]
+    [InlineData("真斗")]
+    [InlineData("日。")]
+    [InlineData("丈")]
+    [InlineData("Hello.")]
+    [InlineData("123")]
+    public void IdenticalSourceAndTranslationAreAcceptedInBothProtocols(string text)
     {
-        Assert.True(AlignmentValidator.IsValid("Hello.", Cue(), true));
-        Assert.True(AlignmentValidator.IsValid("123", Cue(text: "123"), false));
+        var cue = Cue(text: text);
+        var plain = AlignmentValidator.Parse(text, [cue], TranslationOutputFormat.PlainText);
+        var json = AlignmentValidator.Parse(JsonSerializer.Serialize(new Dictionary<string, string> { [cue.Id] = text }), [cue], TranslationOutputFormat.CueIdJson);
+        Assert.Empty(plain.FailedIds); Assert.Equal(text, plain.Translations[cue.Id]);
+        Assert.Empty(json.FailedIds); Assert.Equal(text, json.Translations[cue.Id]);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(" \r\n\t")]
+    [InlineData("译文\u0000")]
+    [InlineData("```译文```")]
+    public void InvalidPlainTextStillFails(string output)
+    {
+        var result = AlignmentValidator.Parse(output, [Cue()], TranslationOutputFormat.PlainText);
+        Assert.Empty(result.Translations); Assert.Equal(["cue-1"], result.FailedIds);
     }
 
     [Fact]

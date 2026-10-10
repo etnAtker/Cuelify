@@ -5,13 +5,13 @@ namespace Cuelify.Core.Translation;
 
 public static class AlignmentValidator
 {
-    public static AlignmentResult Parse(string output, IReadOnlyList<SubtitleCue> cues, TranslationOutputFormat format, bool sourceEqualsTarget = false)
+    public static AlignmentResult Parse(string output, IReadOnlyList<SubtitleCue> cues, TranslationOutputFormat format)
     {
         var accepted = new Dictionary<string, string>(StringComparer.Ordinal);
         if (format == TranslationOutputFormat.PlainText)
         {
             if (cues.Count != 1) throw new ArgumentException("纯文本输出仅支持单条字幕。");
-            if (IsValid(output, cues[0], sourceEqualsTarget) && !output.TrimStart().StartsWith("```", StringComparison.Ordinal))
+            if (IsValid(output) && !output.TrimStart().StartsWith("```", StringComparison.Ordinal))
                 accepted[cues[0].Id] = output.Trim();
         }
         else
@@ -33,7 +33,7 @@ public static class AlignmentValidator
                     // 多余/重复 ID 无法可靠判断错位，整个响应拒收；缺失 ID 只补翻缺失项。
                     if (unique && entries.All(entry => expected.ContainsKey(entry.Name)))
                         foreach (var entry in entries)
-                            if (entry.Value.ValueKind == JsonValueKind.String && IsValid(entry.Value.GetString()!, expected[entry.Name], sourceEqualsTarget))
+                            if (entry.Value.ValueKind == JsonValueKind.String && IsValid(entry.Value.GetString()))
                                 accepted[entry.Name] = entry.Value.GetString()!.Trim();
                 }
             }
@@ -42,11 +42,6 @@ public static class AlignmentValidator
         return new(accepted, cues.Where(cue => !accepted.ContainsKey(cue.Id)).Select(cue => cue.Id).ToArray());
     }
 
-    public static bool IsValid(string? text, SubtitleCue cue, bool sourceEqualsTarget)
-    {
-        if (string.IsNullOrWhiteSpace(text) || text.Any(character => char.IsControl(character) && character is not ('\r' or '\n' or '\t'))) return false;
-        var unchanged = text.Trim().Normalize() == cue.SourceText.Trim().Normalize();
-        // 数字/符号无需强行改写；含文字的未翻译结果在不同语言下补翻或标失败。
-        return sourceEqualsTarget || !unchanged || !cue.SourceText.Any(char.IsLetter);
-    }
+    public static bool IsValid(string? text) => !string.IsNullOrWhiteSpace(text) &&
+        !text.Any(character => char.IsControl(character) && character is not ('\r' or '\n' or '\t'));
 }

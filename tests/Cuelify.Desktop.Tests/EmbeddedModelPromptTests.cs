@@ -291,7 +291,7 @@ public sealed class EmbeddedModelPromptTests
         await model.SaveSettingsCommand.ExecuteAsync(null); model.TaskProviderIndex = (int)TranslationProvider.Local; model.InputPath = "fixture.mp4";
         await model.RunCommand.ExecuteAsync(null); Assert.True(model.CanExport);
         model.UserTemplate = "后来修改 {source_text}"; await model.SavePromptCommand.ExecuteAsync(null);
-        await model.PreviewRequestCommand.ExecuteAsync(null); model.SelectedCue = model.Rows[0]; await model.RetryCueCommand.ExecuteAsync(null);
+        await model.PreviewRequestCommand.ExecuteAsync(null); model.CueSelection.Clear(); model.CueSelection.Select(0); await model.RetryCueCommand.ExecuteAsync(null);
         Assert.Equal("原模板 {source_text}", fixture.Jobs.PreviewSettings!.GetProfile().UserTemplate);
         Assert.Equal("原模板 {source_text}", fixture.Jobs.LastSettings!.GetProfile().UserTemplate); Assert.True(model.CanExport);
     }

@@ -60,7 +60,7 @@ public sealed class EmbeddedModelWorkflowTests
         model.SelectedEmbeddedModel = EmbeddedModelCatalog.Presets[1];
         await model.DownloadModelCommand.ExecuteAsync(null); var secondPath = model.Settings.ModelPath;
         await model.SaveSettingsCommand.ExecuteAsync(null);
-        model.SelectedCue = model.Rows[0]; await model.RetryCueCommand.ExecuteAsync(null);
+        model.CueSelection.Clear(); model.CueSelection.Select(0); await model.RetryCueCommand.ExecuteAsync(null);
         Assert.Equal(EmbeddedModelCatalog.Default.Id, fixture.Jobs.LastSettings!.LocalModelId); Assert.Equal(firstPath, fixture.Jobs.LastSettings.ModelPath);
         model.SelectedEmbeddedModel = EmbeddedModelCatalog.Default;
         Assert.Equal(firstPath, model.Settings.ModelPath); Assert.Equal(firstHash, model.Settings.ModelSha256);

@@ -3,7 +3,9 @@ using Avalonia.Controls;
 using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input;
+using Avalonia.Media;
 using Avalonia.Styling;
+using Avalonia.VisualTree;
 using Cuelify.Core.Media;
 using Cuelify.Core.Subtitles;
 using Cuelify.Core.Translation;
@@ -88,7 +90,7 @@ public sealed class DesktopTests
         Assert.Equal(name, fixture.Jobs.LastSettings!.SourceLanguage);
         Assert.True(model.CanExport);
         model.Settings.SourceLanguage = "英语"; await model.SaveSettingsCommand.ExecuteAsync(null);
-        model.SelectedCue = model.Rows[0]; await model.RetryCueCommand.ExecuteAsync(null);
+        model.CueSelection.Clear(); model.CueSelection.Select(0); await model.RetryCueCommand.ExecuteAsync(null);
         Assert.Equal(name, fixture.Jobs.LastSettings!.SourceLanguage);
     }
 
@@ -306,7 +308,7 @@ public sealed class DesktopTests
         model.Settings.TargetLanguage = "日文";
         await model.SaveSettingsCommand.ExecuteAsync(null);
         Assert.True(model.CanExport);
-        model.SelectedCue = model.Rows[1]; Assert.True(model.CanRetryCue);
+        model.CueSelection.Clear(); model.CueSelection.Select(1); Assert.True(model.CanRetryCue);
         await model.RetryCueCommand.ExecuteAsync(null);
         Assert.Equal("中文", fixture.Jobs.LastSettings!.TargetLanguage);
         model.TaskTargetLanguage = "日文";
@@ -350,12 +352,120 @@ public sealed class DesktopTests
         Assert.False(model.CanExport); Assert.Contains("1 条字幕翻译失败", model.Error);
         Assert.DoesNotContain("cue-2", model.Error); Assert.Equal("翻译失败", model.Rows[1].Translation);
         Assert.Equal("继续处理", model.RunButtonText); Assert.Equal(2, model.Rows[1].Number);
-        model.SelectedCue = model.Rows[1]; Assert.True(model.CanRetryCue);
+        model.CueSelection.Clear(); model.CueSelection.Select(1); Assert.True(model.CanRetryCue);
         fixture.Jobs.Partial = false;
         await model.RetryCueCommand.ExecuteAsync(null);
         Assert.Equal(new[] { "cue-2" }, fixture.Jobs.Forced!.ToArray());
         Assert.Equal(1, fixture.Jobs.Transcriptions); Assert.True(model.CanExport);
         Assert.Equal("开始处理", model.RunButtonText);
+    }
+
+    [AvaloniaFact]
+    public async Task MultipleCueRetryPreservesSelectionUnselectedResultAndOriginalSettings()
+    {
+        using var fixture = new Fixture();
+        fixture.Jobs.SourceCues = FakeJobs.Cues.Concat([new SubtitleCue("cue-3", TimeSpan.FromSeconds(4), TimeSpan.FromSeconds(5), "Third.")]).ToArray();
+        await using var model = fixture.Model();
+        model.InputPath = "fixture.mp4"; await model.RunCommand.ExecuteAsync(null);
+        Assert.False(model.CanRetryCue);
+        var untouched = model.Rows[1].Cue;
+        model.CueSelection.Select(0); model.CueSelection.Select(2);
+        Assert.Equal("已选 2 条字幕", model.CueSelectionSummary); Assert.True(model.CanRetryCue);
+        model.Settings.TargetLanguage = "日文"; await model.SaveSettingsCommand.ExecuteAsync(null);
+        fixture.Jobs.RetranslatedText = "重新翻译后的译文";
+        await model.RetryCueCommand.ExecuteAsync(null);
+        Assert.Equal(new[] { "cue-1", "cue-3" }, fixture.Jobs.Forced!.Order().ToArray());
+        Assert.Equal("中文", fixture.Jobs.LastSettings!.TargetLanguage); Assert.Equal(1, fixture.Jobs.Transcriptions);
+        Assert.Equal(untouched, model.Rows[1].Cue); Assert.Equal("重新翻译后的译文", model.Rows[0].Translation);
+        Assert.Equal("重新翻译后的译文", model.Rows[2].Translation); Assert.True(model.CanExport);
+        Assert.Equal(new[] { 0, 2 }, model.CueSelection.SelectedIndexes.Order().ToArray());
+        Assert.Contains("2 条字幕", fixture.Dialogs.ConfirmationMessage); Assert.Contains("云端翻译可能产生费用", fixture.Dialogs.ConfirmationMessage);
+        model.InputPath = "next.mp4";
+        Assert.False(model.HasCueSelection); Assert.False(model.CanRetryCue);
+    }
+
+    [AvaloniaTheory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task MultipleCueRetryCancellationOrFailureKeepsOtherTranslation(bool cancel)
+    {
+        using var fixture = new Fixture();
+        fixture.Jobs.SourceCues = FakeJobs.Cues.Concat([new SubtitleCue("cue-3", TimeSpan.FromSeconds(4), TimeSpan.FromSeconds(5), "Third.")]).ToArray();
+        await using var model = fixture.Model();
+        model.InputPath = "fixture.mp4"; await model.RunCommand.ExecuteAsync(null);
+        var untouched = model.Rows[2].Cue;
+        model.CueSelection.Select(0); model.CueSelection.Select(1);
+        fixture.Jobs.BlockTranslation = true; fixture.Jobs.ReportTargetedRetry = true;
+        if (!cancel) fixture.Jobs.TranslationFailure = new HttpRequestException("connection failed");
+        var retry = model.RetryCueCommand.ExecuteAsync(null);
+        await fixture.Jobs.TranslationStarted.Task;
+        await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => { }, Avalonia.Threading.DispatcherPriority.Background);
+        Assert.Equal("翻译中…", model.Rows[0].Translation); Assert.Equal("翻译中…", model.Rows[1].Translation);
+        Assert.Equal("重新翻译中", model.Status); Assert.Equal(2, model.CueSelection.Count);
+        if (cancel) model.CancelCommand.Execute(null); else fixture.Jobs.ReleaseTranslation.TrySetResult();
+        await retry;
+        Assert.Equal(untouched, model.Rows[2].Cue); Assert.False(model.CanExport);
+        Assert.Equal(cancel ? "已取消" : "翻译失败", model.Rows[0].Translation);
+        Assert.Equal(cancel ? "已取消" : "翻译失败", model.Rows[1].Translation);
+        Assert.Equal(!cancel, model.Rows[0].IsFailed); Assert.Equal(!cancel, model.Rows[1].IsFailed);
+        Assert.Equal(2, model.CueSelection.Count);
+    }
+
+    [AvaloniaFact]
+    public async Task SubtitleListSupportsControlAndShiftSelection()
+    {
+        using var fixture = new Fixture();
+        fixture.Jobs.SourceCues = FakeJobs.Cues.Concat([new SubtitleCue("cue-3", TimeSpan.FromSeconds(4), TimeSpan.FromSeconds(5), "Third.")]).ToArray();
+        await using var model = fixture.Model();
+        var window = new MainWindow { DataContext = model, Width = 900, Height = 640 };
+        window.Show(); await model.InitializeCommand.ExecutionTask!;
+        model.InputPath = "fixture.mp4"; await model.RunCommand.ExecuteAsync(null);
+        var list = window.FindControl<WorkspaceView>("WorkspacePage")!.FindControl<ListBox>("CueList")!;
+        using (var frame = window.CaptureRenderedFrame()) Assert.NotNull(frame);
+        Click(0, RawInputModifiers.None); Click(2, RawInputModifiers.Control);
+        Assert.Equal(new[] { 0, 2 }, model.CueSelection.SelectedIndexes.Order().ToArray());
+        Assert.Equal("已选 2 条字幕", model.CueSelectionSummary);
+        Click(1, RawInputModifiers.Shift);
+        Assert.Equal(new[] { 1, 2 }, model.CueSelection.SelectedIndexes.Order().ToArray());
+        await model.RetryCueCommand.ExecuteAsync(null);
+        Assert.Equal(new[] { "cue-2", "cue-3" }, fixture.Jobs.Forced!.Order().ToArray());
+        Assert.Equal(new[] { 1, 2 }, model.CueSelection.SelectedIndexes.Order().ToArray());
+        window.Close();
+
+        void Click(int index, RawInputModifiers modifiers)
+        {
+            list.ScrollIntoView(index);
+            using (var frame = window.CaptureRenderedFrame()) Assert.NotNull(frame);
+            var item = list.ContainerFromIndex(index)!;
+            var point = item.TranslatePoint(new Point(8, 8), window)!.Value;
+            window.MouseDown(point, MouseButton.Left, modifiers); window.MouseUp(point, MouseButton.Left, modifiers);
+        }
+    }
+
+    [AvaloniaTheory]
+    [InlineData("浅色", "#B42318")]
+    [InlineData("深色", "#FFB4AB")]
+    public async Task FailedCueUsesThemeErrorColorAndClearsAfterRetry(string theme, string errorColor)
+    {
+        using var fixture = new Fixture(); fixture.Jobs.Partial = true;
+        await using var model = fixture.Model();
+        var window = new MainWindow { DataContext = model, Width = 900, Height = 640 };
+        window.Show(); await model.InitializeCommand.ExecutionTask!; model.Settings.Theme = theme;
+        model.InputPath = "fixture.mp4"; await model.RunCommand.ExecuteAsync(null);
+        await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => { }, Avalonia.Threading.DispatcherPriority.Background);
+        var workspace = window.FindControl<WorkspaceView>("WorkspacePage")!;
+        var list = workspace.FindControl<ListBox>("CueList")!;
+        Assert.Same(model.CueSelection, list.Selection); Assert.Equal(SelectionMode.Multiple, list.SelectionMode);
+        var failedText = Assert.Single(list.GetVisualDescendants().OfType<TextBlock>(), text => text.Text == "翻译失败");
+        Assert.Contains("error", failedText.Classes); Assert.Equal(Color.Parse(errorColor), Assert.IsAssignableFrom<ISolidColorBrush>(failedText.Foreground).Color);
+        list.Selection.Select(0); list.Selection.Select(1);
+        Assert.Equal("已选 2 条字幕", model.CueSelectionSummary);
+        fixture.Jobs.Partial = false; await model.RetryCueCommand.ExecuteAsync(null);
+        await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => { }, Avalonia.Threading.DispatcherPriority.Background);
+        Assert.All(model.Rows, row => Assert.False(row.IsFailed)); Assert.Equal(2, model.CueSelection.Count);
+        Assert.DoesNotContain(list.GetVisualDescendants().OfType<TextBlock>(), text => text.Classes.Contains("error"));
+        using var frame = window.CaptureRenderedFrame(); Assert.NotNull(frame);
+        window.Close();
     }
 
     [AvaloniaFact]
@@ -612,12 +722,15 @@ internal sealed class FakeJobs : IDesktopJobService
     public Exception? PreparationFailure;
     public IProgress<Cuelify.Infrastructure.Translation.Local.LocalPreparationProgress>? PreparationProgress;
     public static SubtitleCue[] Cues { get; } = [new("cue-1", TimeSpan.Zero, TimeSpan.FromSeconds(1), "Hello.", null), new("cue-2", TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(4), "Goodbye.", null)];
+    public SubtitleCue[] SourceCues = Cues;
     public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     public TaskCompletionSource TranslationStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     public TaskCompletionSource ReleaseTranslation { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     public bool Block, BlockTranslation, Partial, Disposed;
     public bool ReportCompletedBatch;
     public bool ReportInterleavedBatch;
+    public bool ReportTargetedRetry;
+    public string? RetranslatedText;
     public int Transcriptions;
     public Exception? Failure;
     public Exception? ProbeFailure;
@@ -656,7 +769,7 @@ internal sealed class FakeJobs : IDesktopJobService
         Transcriptions++; Started.TrySetResult();
         if (Block) await Task.Delay(Timeout.Infinite, token);
         if (Failure is not null) throw Failure;
-        return new("fixture", TimeSpan.FromSeconds(5), [], [], Cues, 0, 0, "fixture.srt");
+        return new("fixture", TimeSpan.FromSeconds(5), [], [], SourceCues, 0, 0, "fixture.srt");
     }
     public async Task<TranslationResult> TranslateAsync(IReadOnlyList<SubtitleCue> cues, AppSettings settings, string key, IReadOnlySet<string>? force, IProgress<TranslationProgress> progress, CancellationToken token)
     {
@@ -664,12 +777,14 @@ internal sealed class FakeJobs : IDesktopJobService
         if (BlockTranslation)
         {
             if (ReportCompletedBatch) progress.Report(new("Translating", [cues[1].Id]) { Cues = cues.Select((cue, index) => cue with { TranslatedText = index == 0 ? "首批译文" : null }).ToArray() });
+            else if (ReportTargetedRetry) progress.Report(new("TargetedRetry", force!.ToArray()));
             else progress.Report(new("Translating", [cues[0].Id]));
             if (ReportInterleavedBatch) progress.Report(new("Translating", []) { Cues = cues.Select((cue, index) => cue with { TranslatedText = index == 1 ? "后批译文" : null }).ToArray() });
             TranslationStarted.TrySetResult(); await ReleaseTranslation.Task.WaitAsync(token);
         }
         if (TranslationFailure is not null) throw TranslationFailure;
-        return new TranslationResult(cues.Select(cue => cue with { TranslatedText = Partial && cue.Id == "cue-2" ? null : "中文译文" }).ToArray(), Partial ? ["cue-2"] : [], 0, 0)
+        var translated = cues.Select(cue => force is not null && !force.Contains(cue.Id) ? cue : cue with { TranslatedText = Partial && cue.Id == "cue-2" ? null : RetranslatedText ?? "中文译文" }).ToArray();
+        return new TranslationResult(translated, translated.Where(cue => cue.TranslatedText is null).Select(cue => cue.Id).ToArray(), 0, 0)
         { FailureReasons = FailureReason is null ? new Dictionary<string, string>() : new Dictionary<string, string> { ["cue-2"] = FailureReason } };
     }
     public async Task<string> TestEngineAsync(AppSettings settings, string key, CancellationToken token, IProgress<Cuelify.Infrastructure.Translation.Local.LocalPreparationProgress>? progress = null)

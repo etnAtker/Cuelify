@@ -35,7 +35,6 @@ public sealed class TranslationOrchestrator(ITranslationEngine engine, string? c
         var failures = new ConcurrentDictionary<string, string>(StringComparer.Ordinal);
         int calls = 0, hits = 0;
         var builder = new PromptBuilder();
-        var sameLanguage = string.Equals(settings.SourceLanguage, settings.TargetLanguage, StringComparison.OrdinalIgnoreCase);
         var batches = Plan(cues, settings);
         if (forceCueIds?.Count == 0) forceCueIds = null;
         try
@@ -49,7 +48,7 @@ public sealed class TranslationOrchestrator(ITranslationEngine engine, string? c
                     throw new InvalidDataException("定向重翻的原有结果与输入字幕不一致。");
                 foreach (var cue in previous.Cues.Where(cue => !forceCueIds.Contains(cue.Id)))
                 {
-                    if (cue.TranslatedText is not null && AlignmentValidator.IsValid(cue.TranslatedText, cue, sameLanguage))
+                    if (cue.TranslatedText is not null && AlignmentValidator.IsValid(cue.TranslatedText))
                     { translations[cue.Id] = cue.TranslatedText; hits++; }
                     else failures[cue.Id] = "原有译文未完成，本次未选中重翻";
                 }
@@ -125,7 +124,7 @@ public sealed class TranslationOrchestrator(ITranslationEngine engine, string? c
                 {
                     progress?.Report(new("Translating", batch.Select(cue => cue.Id).ToArray()));
                     var response = await SendWithRetry(request);
-                    var aligned = AlignmentValidator.Parse(response.Content, batch, profile.OutputFormat, sameLanguage);
+                    var aligned = AlignmentValidator.Parse(response.Content, batch, profile.OutputFormat);
                     foreach (var item in aligned.Translations) { accepted[item.Key] = item.Value; translations[item.Key] = item.Value; }
                     await AtomicFile.WriteJsonAsync(path, new CachedTranslations(accepted), CancellationToken.None);
                     pending = batch.Where(cue => !accepted.ContainsKey(cue.Id)).ToArray();
@@ -187,7 +186,7 @@ public sealed class TranslationOrchestrator(ITranslationEngine engine, string? c
                     // 单条失败最多 attempts 次；transport 暂时失败也占此预算。
                     Interlocked.Increment(ref calls);
                     var response = await engine.TranslateAsync(request, cancellationToken);
-                    var aligned = AlignmentValidator.Parse(response.Content, [cue], profile.OutputFormat, sameLanguage);
+                    var aligned = AlignmentValidator.Parse(response.Content, [cue], profile.OutputFormat);
                     if (aligned.Translations.TryGetValue(cue.Id, out var text))
                     {
                         await AtomicFile.WriteJsonAsync(path, new CachedTranslations(new Dictionary<string, string> { [cue.Id] = text }), CancellationToken.None);
@@ -233,7 +232,7 @@ public sealed class TranslationOrchestrator(ITranslationEngine engine, string? c
             var cached = await AtomicFile.ReadJsonAsync<CachedTranslations>(path, cancellationToken);
             if (cached is null) return new(StringComparer.Ordinal);
             var expected = batch.ToDictionary(cue => cue.Id, StringComparer.Ordinal);
-            if (cached.Translations is null || cached.Translations.Any(item => !expected.TryGetValue(item.Key, out var cue) || !AlignmentValidator.IsValid(item.Value, cue, sameLanguage)))
+            if (cached.Translations is null || cached.Translations.Any(item => !expected.ContainsKey(item.Key) || !AlignmentValidator.IsValid(item.Value)))
                 throw new InvalidDataException("翻译缓存内容无效，请检查该批次缓存。");
             return new(cached.Translations, StringComparer.Ordinal);
         }

@@ -72,7 +72,7 @@
       <Border Classes="surface" Margin="0,0,0,16">
         <Grid ColumnDefinitions="*,Auto">
           <StackPanel Spacing="8"><TextBlock FontWeight="SemiBold" Text="{Binding FileName}" TextWrapping="Wrap" /><TextBlock Text="{Binding Status}" /><ProgressBar IsIndeterminate="True" IsVisible="{Binding IsProcessing}" Height="4" /></StackPanel>
-          <StackPanel Grid.Column="1" Spacing="8" Margin="16,0,0,0" VerticalAlignment="Center"><TextBlock Classes="muted" Text="{Binding ResultSummary}" /><Button Content="重新翻译所选字幕" Command="{Binding RetryCueCommand}" /></StackPanel>
+          <StackPanel Grid.Column="1" Spacing="8" Margin="16,0,0,0" VerticalAlignment="Center"><TextBlock Classes="muted" Text="{Binding ResultSummary}" /><TextBlock Classes="muted" Text="{Binding CueSelectionSummary}" IsVisible="{Binding HasCueSelection}" /><Button Content="重新翻译所选字幕" Command="{Binding RetryCueCommand}" /></StackPanel>
         </Grid>
       </Border>
       <Grid Grid.Row="1" ColumnDefinitions="140,*,*" Margin="12,0,12,8">
@@ -80,13 +80,13 @@
         <TextBlock Grid.Column="1" Classes="muted" Text="原文" VerticalAlignment="Center" />
         <TextBlock Grid.Column="2" Classes="muted" Text="译文" VerticalAlignment="Center" />
       </Grid>
-      <ListBox x:Name="CueList" Grid.Row="2" ItemsSource="{Binding Rows}" SelectedItem="{Binding SelectedCue}" AutomationProperties.Name="原文与译文对照">
+      <ListBox x:Name="CueList" Grid.Row="2" ItemsSource="{Binding Rows}" Selection="{Binding CueSelection}" SelectionMode="Multiple" AutomationProperties.Name="原文与译文对照">
         <ListBox.ItemTemplate>
           <DataTemplate x:DataType="vm:CueRow">
             <Grid ColumnDefinitions="140,*,*" Margin="0,10">
               <StackPanel Spacing="4"><TextBlock Text="{Binding Number}" /><TextBlock Classes="muted" FontSize="12" Text="{Binding Time}" TextWrapping="Wrap" /></StackPanel>
               <TextBlock Grid.Column="1" Text="{Binding Source}" TextWrapping="Wrap" Margin="0,0,20,0" />
-              <TextBlock Grid.Column="2" Text="{Binding Translation}" TextWrapping="Wrap" />
+              <TextBlock Grid.Column="2" Classes.error="{Binding IsFailed}" Text="{Binding Translation}" TextWrapping="Wrap" />
             </Grid>
           </DataTemplate>
         </ListBox.ItemTemplate>

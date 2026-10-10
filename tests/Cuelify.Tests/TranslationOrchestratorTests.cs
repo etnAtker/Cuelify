@@ -115,7 +115,7 @@ public sealed class TranslationOrchestratorTests
     public async Task PartialFailureCanResumeOnlyMissingCueAndCannotExportIncompleteTranslation()
     {
         using var directory = new TestDirectory();
-        var engine = new Engine { Behavior = (_, call, _) => Task.FromResult(new TranslationResponse(call == 1 ? "{\"a\":\"你好\"}" : "{\"b\":\"Goodbye.\"}")) };
+        var engine = new Engine { Behavior = (_, call, _) => Task.FromResult(new TranslationResponse(call == 1 ? "{\"a\":\"你好\"}" : "{\"b\":\" \"}")) };
         var orchestrator = Orchestrator(directory, engine);
         var partial = await orchestrator.TranslateAsync(Cues, PromptPresets.BatchSubtitles, Settings);
         Assert.False(partial.IsComplete);
@@ -214,14 +214,75 @@ public sealed class TranslationOrchestratorTests
     }
 
     [Fact]
-    public async Task PersistentUntranslatedSingleIsBounded()
+    public async Task PersistentEmptySingleIsBounded()
     {
         using var directory = new TestDirectory();
-        var engine = new Engine { Behavior = (_, _, _) => Task.FromResult(new TranslationResponse("{\"a\":\"Hello.\"}")) };
+        var engine = new Engine { Behavior = (_, _, _) => Task.FromResult(new TranslationResponse("{\"a\":\" \"}")) };
         var result = await Orchestrator(directory, engine).TranslateAsync([Cues[0]], PromptPresets.BatchSubtitles, Settings);
         Assert.False(result.IsComplete);
         Assert.Equal(3, result.EngineCalls);
         Assert.Null(result.Cues[0].TranslatedText);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task IdenticalTranslationsAreCachedAndRetainedDuringTargetedRetry(bool batch)
+    {
+        using var directory = new TestDirectory();
+        var inputs = new[] { TranslationPromptTests.Cue("a", "我"), TranslationPromptTests.Cue("b", "真斗", 2) };
+        var profile = batch ? PromptPresets.BatchSubtitles : PromptPresets.SingleSimple;
+        var engine = new Engine { Behavior = (request, _, _) => Task.FromResult(new TranslationResponse(batch
+            ? JsonSerializer.Serialize(request.Cues.ToDictionary(cue => cue.Id, cue => cue.SourceText))
+            : Assert.Single(request.Cues).SourceText)) };
+        var orchestrator = Orchestrator(directory, engine);
+        var first = await orchestrator.TranslateAsync(inputs, profile, Settings);
+        Assert.True(first.IsComplete);
+        Assert.Equal(inputs.Select(cue => cue.SourceText), first.Cues.Select(cue => cue.TranslatedText));
+        var cached = await orchestrator.TranslateAsync(inputs, profile, Settings);
+        Assert.True(cached.IsComplete); Assert.Equal(0, cached.EngineCalls); Assert.Equal(2, cached.CacheHits);
+        var targeted = await orchestrator.TranslateAsync(inputs, profile, Settings, new HashSet<string> { "b" });
+        Assert.True(targeted.IsComplete); Assert.Equal(1, targeted.EngineCalls); Assert.Equal("我", targeted.Cues[0].TranslatedText);
+    }
+
+    [Fact]
+    public async Task RetranslatingMultipleCuesKeepsUnselectedTranslationAndTimeline()
+    {
+        using var directory = new TestDirectory();
+        var inputs = Cues.Concat([TranslationPromptTests.Cue("c", "Third.", 4)]).ToArray();
+        var engine = new Engine();
+        var orchestrator = Orchestrator(directory, engine);
+        var original = await orchestrator.TranslateAsync(inputs, PromptPresets.BatchSubtitles, Settings);
+        var requested = new List<string>();
+        engine.Behavior = (request, _, _) =>
+        {
+            var cue = Assert.Single(request.Cues); requested.Add(cue.Id);
+            return Task.FromResult(new TranslationResponse(JsonSerializer.Serialize(new Dictionary<string, string> { [cue.Id] = "新译文" + cue.Id })));
+        };
+        var result = await orchestrator.TranslateAsync(inputs, PromptPresets.BatchSubtitles, Settings, new HashSet<string> { "a", "c" });
+        Assert.True(result.IsComplete); Assert.Equal(new[] { "a", "c" }, requested); Assert.Equal(2, result.EngineCalls);
+        Assert.Equal(original.Cues[1], result.Cues[1]);
+        Assert.Equal(inputs.Select(cue => (cue.Id, cue.Start, cue.End)), result.Cues.Select(cue => (cue.Id, cue.Start, cue.End)));
+    }
+
+    [Fact]
+    public async Task MultipleCueRetryFailureInvalidatesOnlySelectedCache()
+    {
+        using var directory = new TestDirectory();
+        var inputs = Cues.Concat([TranslationPromptTests.Cue("c", "Third.", 4)]).ToArray();
+        var engine = new Engine();
+        var orchestrator = Orchestrator(directory, engine);
+        var original = await orchestrator.TranslateAsync(inputs, PromptPresets.BatchSubtitles, Settings);
+        engine.Behavior = (_, _, _) => Task.FromException<TranslationResponse>(new TranslationServiceException(HttpStatusCode.Unauthorized, null));
+        var failed = await orchestrator.TranslateAsync(inputs, PromptPresets.BatchSubtitles, Settings, new HashSet<string> { "a", "c" });
+        Assert.Equal(new[] { "a", "c" }, failed.FailedIds); Assert.Equal(2, failed.EngineCalls);
+        Assert.Null(failed.Cues[0].TranslatedText); Assert.Null(failed.Cues[2].TranslatedText);
+        Assert.Equal(original.Cues[1], failed.Cues[1]);
+        var requested = new List<string>();
+        engine.Behavior = (request, _, _) => { requested.Add(Assert.Single(request.Cues).Id); return Task.FromResult(Response(request)); };
+        var recovered = await orchestrator.TranslateAsync(inputs, PromptPresets.BatchSubtitles, Settings);
+        Assert.True(recovered.IsComplete); Assert.Equal(new[] { "a", "c" }, requested); Assert.Equal(2, recovered.EngineCalls);
+        Assert.Equal(original.Cues[1], recovered.Cues[1]);
     }
 
     [Theory]

@@ -4,13 +4,23 @@
 
 ## 当前实现
 
-已实现单媒体 FFmpeg/Silero/ElevenLabs 识别、三条翻译路径、提示词与上下文、独立缓存、取消/恢复、单条重翻及严格译文 SRT。桌面已改为图标导航和三步工作台，设置/日志独立，结果绑定任务配置快照；日志支持按行多选复制，第二步源语言统一驱动 ASR 与翻译。零时长识别文字按可配置容差合并或独立显示，默认 500 毫秒。源码入口见[架构](architecture.md)，冻结范围见[产品契约](product.md)。
+已实现单媒体 FFmpeg/Silero/ElevenLabs 识别、三条翻译路径、提示词与上下文、独立缓存、取消/恢复、单条/多选重翻及严格译文 SRT。桌面已改为图标导航和三步工作台，设置/日志独立，结果绑定任务配置快照；日志支持按行多选复制，字幕支持 Ctrl/Shift 多选重翻及失败标红，第二步源语言统一驱动 ASR 与翻译。零时长识别文字按可配置容差合并或独立显示，默认 500 毫秒。源码入口见[架构](architecture.md)，冻结范围见[产品契约](product.md)。
 
 已加入主密码加密凭证、三服务密钥隔离、解锁与流程门禁；不包含多账户或多组云端服务配置档案。凭证层不依赖操作系统账户，整体跨平台发行适配尚未实施。完整产品验收尚未结束，不能用“原 MVP 都完成了”跳过下面的人工项目。
 
 维护者已指定自有代码与文档使用 [MIT 许可证](../../LICENSE)，Copyright (c) 2026 etnAtker；发行包包含项目许可证并保留第三方声明，见 D010。项目许可选择不代表所有原生间接组件的发行义务已经完成核验。
 
-## 本轮移除模型校验与服务复用验证
+## 本轮译文校验与多选重翻验证
+
+2026-10-10，按批准的 D019 删除原译文相同时判定失败的规则及语言豁免参数；服务响应、缓存读取和定向重翻恢复旧结果统一保留非空、非法控制字符、输出协议与 ID 对齐校验，缓存身份和 schema 不变。只接受实际服务返回或已有成功缓存，不用原文填补失败结果。旧失败条目需重新请求，未修改用户任务缓存、设置或凭证。
+
+字幕列表复用 SelectionModel 支持 Ctrl 多选、Shift 连选，显示已选数量；单条/多条重翻捕获所选 ID 集合、使用原任务快照，确认替换及费用，仅清除所选结果。行更新按 ID 恢复选择，新任务清空选择；TargetedRetry 显示重新翻译中并更新行状态，取消/失败不恢复旧成功值，失败译文使用浅深色主题错误色及文字，成功后恢复正常样式。
+
+执行 `dotnet test tests/Cuelify.Tests/Cuelify.Tests.csproj -c Release --no-restore --filter 'FullyQualifiedName~TranslationPromptTests|FullyQualifiedName~TranslationOrchestratorTests' --logger 'trx;LogFileName=translation-validation-multiselect-final.trx'`，51 项通过；执行 Desktop Release 编译测试后，以 `dotnet test tests/Cuelify.Desktop.Tests/Cuelify.Desktop.Tests.csproj -c Release --no-build --no-restore --logger 'trx;LogFileName=subtitle-multiselect-desktop-final.trx'` 完成最终全量桌面复验，121 项通过、1 项真实 GPU 门控跳过，零失败。TRX 位于各测试项目忽略的 TestResults/。覆盖相同文本的纯文本/JSON 接收及缓存复用、无效输出有限重试、多个指定 ID 的请求范围和失效缓存、未选中结果/时间轴保留、原配置快照、选择保持/重置，以及多选重翻取消/失败、真实 headless Ctrl/Shift 鼠标输入和浅深色 XAML 失败色/恢复。初次鼠标用例点击超出可见区域，改为滚动目标行可见后复验通过；测试刷色断言使用 ISolidColorBrush 兼容不可变主题画刷。
+
+本轮未新增 ElevenLabs、兼容 API、DeepSeek 付费请求，也未运行 Hy-MT2 实际 GPU 生成；headless 与业务替身不能作为真实服务、发行或原生 GUI/DPI 人工验收。详细拒收原因日志、识别分片完成进度与按阶段继续处理不在本轮已实施范围，仍待独立计划。
+
+## 上一轮移除模型校验与服务复用验证
 
 2026-10-10，按批准的 D018 移除手动选择和运行前的模型 SHA、GGUF 文件头及架构/量化校验。手动选择不再联网查询官方文件身份，任意可读文件均可记录；预设 ID 仍用于设置默认值与提示词关联，不证明文件身份。下载完整性校验保持。模型缓存版本仅含路径、大小和修改时间，历史配置哈希不参与运行判断；旧缓存保留，但新本地缓存协议与旧身份隔离。
 
