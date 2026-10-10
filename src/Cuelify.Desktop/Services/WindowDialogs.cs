@@ -7,17 +7,25 @@ using Cuelify.Desktop.Views;
 
 namespace Cuelify.Desktop.Services;
 
+public enum PromptSwitchChoice { Cancel, Save, Discard }
+
 public interface IWindowDialogs
 {
     Task<string?> OpenAsync(string title, string[] patterns);
     Task<string?> SaveSrtAsync(string suggestedName);
     Task<bool> ConfirmAsync(string message, CancellationToken token = default);
+    Task<PromptSwitchChoice> ConfirmPromptSwitchAsync(string templateName);
     Task<bool> PasswordAsync(PasswordPurpose purpose, Func<string, string, Task> submit, CancellationToken token = default);
     Task CopyTextAsync(string text) => throw new NotSupportedException("剪贴板不可用。");
 }
 
 public sealed class WindowDialogs(Window owner) : IWindowDialogs
 {
+    public Task<PromptSwitchChoice> ConfirmPromptSwitchAsync(string templateName)
+    {
+        var dialog = new PromptSwitchDialog(templateName) { RequestedThemeVariant = owner.ActualThemeVariant };
+        return dialog.ShowDialog<PromptSwitchChoice>(owner);
+    }
     public async Task<bool> PasswordAsync(PasswordPurpose purpose, Func<string, string, Task> submit, CancellationToken token = default)
     {
         var model = new MasterPasswordViewModel(purpose, submit);

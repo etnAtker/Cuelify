@@ -17,18 +17,17 @@ public sealed class TranslationOrchestrator(ITranslationEngine engine, string? c
     public async Task<TranslationResult> TranslateAsync(IReadOnlyList<SubtitleCue> cues, PromptProfile profile, TranslationSettings settings,
         IReadOnlySet<string>? forceCueIds = null, IProgress<TranslationProgress>? progress = null, CancellationToken cancellationToken = default)
     {
-        settings.Validate();
         PromptBuilder.Validate(profile);
+        settings = settings with { BatchSize = profile.BatchTranslation ? profile.BatchSize : 1,
+            MaximumBatchCharacters = profile.BatchTranslation ? profile.MaximumBatchCharacters : 50000 };
+        settings.Validate();
         // 已显示的旧译文不属于新请求输入，也不能改变缓存键或混入其他语言上下文。
         cues = cues.Select(cue => cue with { TranslatedText = null }).ToArray();
-        if (profile.OutputFormat != engine.OutputFormat) throw new ArgumentException("提示词输出协议与引擎不一致。");
-        if (engine.OutputFormat == TranslationOutputFormat.PlainText && (settings.BatchSize != 1 || settings.Concurrency != 1))
-            throw new ArgumentException("内嵌模型需要逐条翻译。");
         _ = SrtSerializer.SerializeSource(cues); // 付费前校验输入 ID、顺序及时间戳。
         var indices = cues.Select((cue, index) => (cue.Id, index)).ToDictionary(item => item.Id, item => item.index, StringComparer.Ordinal);
         if (forceCueIds?.Any(id => !indices.ContainsKey(id)) == true) throw new ArgumentException("定向重翻包含未知 cue ID。");
-        var identity = AtomicFile.Hash(new { engine.CacheIdentity, profile, settings.SourceLanguage, settings.TargetLanguage, settings.TargetStyle,
-            Input = cues.Select(cue => new { cue.Id, cue.Start, cue.End, cue.SourceText }).ToArray(), Schema = "translation-v1" });
+        var identity = AtomicFile.Hash(new { engine.CacheIdentity, Prompt = profile.ExecutionIdentity, settings.BatchSize, settings.MaximumBatchCharacters, settings.SourceLanguage, settings.TargetLanguage, settings.TargetStyle,
+            Input = cues.Select(cue => new { cue.Id, cue.Start, cue.End, cue.SourceText }).ToArray(), Schema = "translation-v2" });
         var directory = Path.Combine(_cacheRoot, identity);
         Directory.CreateDirectory(directory);
         await using var jobLock = new FileStream(Path.Combine(directory, "translation.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
@@ -126,7 +125,7 @@ public sealed class TranslationOrchestrator(ITranslationEngine engine, string? c
                 {
                     progress?.Report(new("Translating", batch.Select(cue => cue.Id).ToArray()));
                     var response = await SendWithRetry(request);
-                    var aligned = AlignmentValidator.Parse(response.Content, batch, engine.OutputFormat, sameLanguage);
+                    var aligned = AlignmentValidator.Parse(response.Content, batch, profile.OutputFormat, sameLanguage);
                     foreach (var item in aligned.Translations) { accepted[item.Key] = item.Value; translations[item.Key] = item.Value; }
                     await AtomicFile.WriteJsonAsync(path, new CachedTranslations(accepted), CancellationToken.None);
                     pending = batch.Where(cue => !accepted.ContainsKey(cue.Id)).ToArray();
@@ -145,6 +144,15 @@ public sealed class TranslationOrchestrator(ITranslationEngine engine, string? c
                     foreach (var cue in pending) failures[cue.Id] = Category(exception);
                     return;
                 }
+                catch (Local.PromptCapacityException) when (batch.Count > 1)
+                {
+                    var middle = batch.Count / 2;
+                    await ProcessBatch(batch.Take(middle).ToArray(), snapshot);
+                    await ProcessBatch(batch.Skip(middle).ToArray(), snapshot);
+                    return;
+                }
+                catch (Local.PromptCapacityException)
+                { foreach (var cue in pending) failures[cue.Id] = "本地上下文不足"; return; }
                 catch (InvalidDataException) { /* 结构/截断错误按 cue 缩小请求重新验证。 */ }
             }
             foreach (var cue in pending)
@@ -179,7 +187,7 @@ public sealed class TranslationOrchestrator(ITranslationEngine engine, string? c
                     // 单条失败最多 attempts 次；transport 暂时失败也占此预算。
                     Interlocked.Increment(ref calls);
                     var response = await engine.TranslateAsync(request, cancellationToken);
-                    var aligned = AlignmentValidator.Parse(response.Content, [cue], engine.OutputFormat, sameLanguage);
+                    var aligned = AlignmentValidator.Parse(response.Content, [cue], profile.OutputFormat, sameLanguage);
                     if (aligned.Translations.TryGetValue(cue.Id, out var text))
                     {
                         await AtomicFile.WriteJsonAsync(path, new CachedTranslations(new Dictionary<string, string> { [cue.Id] = text }), CancellationToken.None);
@@ -258,6 +266,7 @@ public sealed class TranslationOrchestrator(ITranslationEngine engine, string? c
         ServiceCredentialException credential => credential.Message,
         Local.LocalTranslationException local => $"Local:{local.Category}",
         TranslationServiceException service => $"HTTP {(int)service.StatusCode}", InvalidDataException => "译文或缓存校验失败",
+        Local.PromptCapacityException => "本地上下文不足",
         InvalidOperationException => "配置或凭据无效", HttpRequestException => "网络失败", TimeoutException => "请求超时",
         OperationCanceledException => "取消", _ => "翻译处理失败"
     };

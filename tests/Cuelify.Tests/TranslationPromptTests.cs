@@ -16,7 +16,7 @@ public sealed class TranslationPromptTests
     public void JsonAndSourceVariablesAreReplacedOnceWithoutReinterpretingSource()
     {
         var cue = Cue(text: "\"Hello\"\n{target_language} {unknown}");
-        var request = new PromptBuilder().Build(PromptPresets.Cloud, new(), [cue], []);
+        var request = new PromptBuilder().Build(PromptPresets.BatchSubtitles, new(), [cue], []);
         var user = request.Messages[^1].Content;
         var json = user[(user.LastIndexOf('\n') + 1)..];
         Assert.Equal(cue.SourceText, JsonSerializer.Deserialize<Dictionary<string, string>>(json)![cue.Id]);
@@ -26,12 +26,12 @@ public sealed class TranslationPromptTests
     [Fact]
     public void LocalDefaultHasNoSystemMessageAndContextIsReadOnly()
     {
-        var local = new PromptBuilder().Build(PromptPresets.Local, new(), [Cue()], [Cue("old", "Previous") with { TranslatedText = "上文" }]);
+        var local = new PromptBuilder().Build(PromptPresets.SingleContext, new(), [Cue()], [Cue("old", "Previous") with { TranslatedText = "上文" }]);
         Assert.Single(local.Messages);
         Assert.Equal("user", local.Messages[0].Role);
         Assert.Contains("Previous", local.Messages[0].Content);
         Assert.Contains("上文", local.Messages[0].Content);
-        var cloud = new PromptBuilder().Build(PromptPresets.Cloud, new(), [Cue()], [Cue("old", "Previous") with { TranslatedText = "上文" }]);
+        var cloud = new PromptBuilder().Build(PromptPresets.BatchSubtitles, new(), [Cue()], [Cue("old", "Previous") with { TranslatedText = "上文" }]);
         Assert.Contains("Previous", cloud.Messages[^1].Content);
         var output = AlignmentValidator.Parse("{\"old\":\"多余\",\"cue-1\":\"你好\"}", [Cue()], TranslationOutputFormat.CueIdJson);
         Assert.Empty(output.Translations);
@@ -40,26 +40,25 @@ public sealed class TranslationPromptTests
     [Fact]
     public void SimpleLocalPresetRendersOnlyCurrentSubtitleWithoutContext()
     {
-        var request = new PromptBuilder().Build(PromptPresets.LocalSimple, new(), [Cue(text: "Current")],
+        var request = new PromptBuilder().Build(PromptPresets.SingleSimple, new(), [Cue(text: "Current")],
             [Cue("before", "Before") with { TranslatedText = "上文译文" }], [Cue("after", "After")]);
         Assert.Single(request.Messages); Assert.Equal("user", request.Messages[0].Role);
         Assert.Contains("Current", request.Messages[0].Content); Assert.Contains("翻译成中文", request.Messages[0].Content);
         Assert.DoesNotContain("Before", request.Messages[0].Content); Assert.DoesNotContain("After", request.Messages[0].Content);
         Assert.DoesNotContain("上文译文", request.Messages[0].Content);
-        Assert.Equal(PromptPresets.LegacyLocal.UserTemplate, PromptPresets.LocalSimple.UserTemplate);
     }
 
     [Theory]
     [InlineData("{unknown} {cues_json}")]
     [InlineData("Only context {context_before}")]
     public void UnknownOrMissingSourceVariableIsRejected(string user) => Assert.Throws<ArgumentException>(() =>
-        PromptBuilder.Validate(PromptPresets.Cloud with { UserTemplate = user }));
+        PromptBuilder.Validate(PromptPresets.BatchSubtitles with { UserTemplate = user }));
 
     [Fact]
     public async Task EditedProfileCanBeSavedAndRestored()
     {
         using var directory = new TestDirectory();
-        var profile = PromptPresets.Concise with { Name = "我的预设", UserTemplate = "风格：{target_style}\n{context_before}\n{cues_json}" };
+        var profile = PromptPresets.BatchSubtitles with { Name = "我的预设", UserTemplate = "风格：{target_style}\n{context_before}\n{cues_json}" };
         await PromptProfileStore.SaveAsync(directory.File("prompt.json"), profile, CancellationToken.None);
         Assert.Equal(profile, await PromptProfileStore.LoadAsync(directory.File("prompt.json"), CancellationToken.None));
     }
@@ -114,11 +113,11 @@ public sealed class TranslationPromptTests
     }
 
     [Fact]
-    public async Task LocalOptionsCannotEnableCpuOnlyOrArbitraryModel()
+    public void LocalOptionsRejectCpuOnlyAndUnknownPresetButDoNotInspectModelContent()
     {
-        Assert.Throws<ArgumentException>(() => new EmbeddedTranslationEngine(new() { GpuLayers = 0 }));
-        Assert.Throws<ArgumentException>(() => new EmbeddedTranslationEngine(new() { MaximumTokens = 4096 }));
-        Assert.Throws<ArgumentException>(() => new EmbeddedTranslationEngine(new() { ModelId = "unknown" }));
-        await Assert.ThrowsAsync<FileNotFoundException>(() => EmbeddedModelOptions.VerifyIdentityAsync("other.gguf", CancellationToken.None));
+        Assert.Throws<ArgumentException>(() => new EmbeddedModelOptions { GpuLayers = 0 }.Validate());
+        Assert.Throws<ArgumentException>(() => new EmbeddedModelOptions { MaximumTokens = 4096 }.Validate());
+        Assert.Throws<ArgumentException>(() => new EmbeddedModelOptions { ModelId = "unknown" }.Validate());
+        Assert.Throws<FileNotFoundException>(() => ModelFileVersion.Read("other.gguf"));
     }
 }

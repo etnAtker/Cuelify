@@ -97,7 +97,7 @@ public sealed class ModelDownloadTests
     }
 
     [Fact]
-    public async Task ExistingCurrentFileNeedsNoDownloadAndCustomFilenameCanBeVerified()
+    public async Task ExistingCurrentFileNeedsNoDownload()
     {
         using var directory = new TestDirectory();
         var path = directory.File(Model.DefaultFileName); await File.WriteAllBytesAsync(path, Payload);
@@ -105,9 +105,7 @@ public sealed class ModelDownloadTests
         using var handler = new Handler((request, _) => { calls++; Assert.Contains("/api/models/", request.RequestUri!.AbsolutePath); return Task.FromResult(Metadata()); });
         using var http = new HttpClient(handler); var service = new ModelDownloadService(http);
         await service.DownloadAsync(Model, Path.GetDirectoryName(path)!, new Sink(), default);
-        var custom = directory.File("重命名.gguf"); await File.WriteAllBytesAsync(custom, Payload);
-        Assert.Equal(Hash(Payload), (await service.VerifyAsync(Model, custom, new Sink(), default)).Sha256);
-        Assert.Equal(2, calls);
+        Assert.Equal(1, calls);
     }
 
     [Fact]

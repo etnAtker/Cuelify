@@ -1,0 +1,13 @@
+<Window xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:views="using:Cuelify.Desktop.Views"
+        x:Class="Cuelify.Desktop.Views.PromptSwitchDialog" x:DataType="views:PromptSwitchDialog"
+        Title="未保存的提示词" Width="520" SizeToContent="Height" CanResize="False" WindowStartupLocation="CenterOwner">
+  <StackPanel Margin="24" Spacing="16">
+    <TextBlock Classes="section" Text="是否保存当前提示词？" />
+    <TextBlock Text="{Binding Message}" TextWrapping="Wrap" />
+    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+      <Button x:Name="CancelSwitchButton" Content="取消" IsCancel="True" Click="OnCancel" />
+      <Button x:Name="DiscardSwitchButton" Content="放弃并切换" Click="OnDiscard" />
+      <Button x:Name="SaveSwitchButton" Content="保存并切换" Classes="accent" IsDefault="True" Click="OnSave" />
+    </StackPanel>
+  </StackPanel>
+</Window>

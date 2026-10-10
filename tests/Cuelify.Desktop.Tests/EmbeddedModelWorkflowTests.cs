@@ -12,21 +12,37 @@ namespace Cuelify.Desktop.Tests;
 
 public sealed class EmbeddedModelWorkflowTests
 {
+    [AvaloniaFact]
+    public async Task ManualModelSelectionRecordsAnyReadableFileWithoutDownloadOrIdentityCheck()
+    {
+        using var fixture = new Fixture(); var downloads = new Downloads();
+        var path = Path.Combine(fixture.Root, "手动任意模型.gguf"); await File.WriteAllTextAsync(path, "不是 GGUF，也没有官方身份");
+        fixture.Dialogs.OpenPath = path;
+        await using var model = fixture.Model(downloads); model.Settings.Provider = TranslationProvider.Local;
+        model.Settings.ModelSha256 = "旧哈希";
+        await model.ChooseModelCommand.ExecuteAsync(null);
+        Assert.Equal(path, model.Settings.ModelPath); Assert.Empty(model.Settings.ModelSha256);
+        Assert.Contains("已选择", model.ModelDownloadStatus); Assert.Empty(model.Error);
+        Assert.False(downloads.Started.Task.IsCompleted); Assert.False(model.IsBusy);
+        await model.SaveSettingsCommand.ExecuteAsync(null);
+        Assert.Equal(path, (await fixture.Store.LoadAsync())!.ModelPath);
+    }
+
     [Fact]
-    public async Task DefaultAndEmptyLegacyPathsUseConfigurationFolderAndOldModelAndCustomPromptsArePreserved()
+    public async Task DefaultsUseConfigurationFolderAndOldSchemaIsBackedUpWithoutMigration()
     {
         using var fixture = new Fixture();
         var fresh = fixture.Store.CreateDefaults();
         Assert.Equal(fixture.Store.DefaultModelPath(EmbeddedModelCatalog.Default), fresh.ModelPath);
-        await AtomicFile.WriteJsonAsync(Path.Combine(fixture.Root, "settings.json"), new AppSettings { LocalProfile = PromptPresets.LegacyLocal }, default);
-        var migrated = await fixture.Store.LoadAsync();
-        Assert.Equal(fresh.ModelPath, migrated!.ModelPath); Assert.Equal(PromptPresets.LocalSimple, migrated.GetLocalProfile());
-        var oldPath = Path.Combine(fixture.Root, "旧模型 自定义文件名.gguf");
-        var custom = PromptPresets.LegacyLocal with { Name = "自定义", UserTemplate = "自定义规则 {source_text}" };
-        await AtomicFile.WriteJsonAsync(Path.Combine(fixture.Root, "settings.json"), new AppSettings { ModelPath = oldPath, LocalProfile = custom, ContextSize = 2048 }, default);
-        migrated = await fixture.Store.LoadAsync();
-        Assert.Equal(EmbeddedModelCatalog.Legacy.Id, migrated!.EmbeddedModelId); Assert.Equal(oldPath, migrated.ModelPath);
-        Assert.Equal(custom, migrated.GetLocalProfile()); Assert.Equal(2048, migrated.ContextSize);
+        var oldPath = Path.Combine(fixture.Root, "旧模型.gguf"); await File.WriteAllTextAsync(oldPath, "保留模型");
+        const string previous = "{\"ModelPath\":\"old.gguf\",\"LocalProfile\":{},\"TranslationConcurrency\":1}";
+        await File.WriteAllTextAsync(Path.Combine(fixture.Root, "settings.json"), previous);
+        var loaded = (await fixture.Store.LoadAsync())!;
+        Assert.Equal(fresh.ModelPath, loaded.ModelPath); Assert.Equal(4, loaded.TranslationConcurrency);
+        Assert.Equal(previous, await File.ReadAllTextAsync(Directory.GetFiles(fixture.Root, "settings.previous-*.json").Single()));
+        Assert.Equal("保留模型", await File.ReadAllTextAsync(oldPath));
+        Assert.Contains("备份", fixture.Store.LastLoadNotice);
+        Assert.Empty(loaded.PromptLibrary); Assert.Equal(2, loaded.SchemaVersion);
     }
 
     [AvaloniaFact]
@@ -45,7 +61,7 @@ public sealed class EmbeddedModelWorkflowTests
         await model.DownloadModelCommand.ExecuteAsync(null); var secondPath = model.Settings.ModelPath;
         await model.SaveSettingsCommand.ExecuteAsync(null);
         model.SelectedCue = model.Rows[0]; await model.RetryCueCommand.ExecuteAsync(null);
-        Assert.Equal(EmbeddedModelCatalog.Default.Id, fixture.Jobs.LastSettings!.EmbeddedModelId); Assert.Equal(firstPath, fixture.Jobs.LastSettings.ModelPath);
+        Assert.Equal(EmbeddedModelCatalog.Default.Id, fixture.Jobs.LastSettings!.LocalModelId); Assert.Equal(firstPath, fixture.Jobs.LastSettings.ModelPath);
         model.SelectedEmbeddedModel = EmbeddedModelCatalog.Default;
         Assert.Equal(firstPath, model.Settings.ModelPath); Assert.Equal(firstHash, model.Settings.ModelSha256);
         model.SelectedEmbeddedModel = EmbeddedModelCatalog.Presets[1]; Assert.Equal(secondPath, model.Settings.ModelPath);
@@ -135,7 +151,5 @@ public sealed class EmbeddedModelWorkflowTests
             var path = Path.Combine(root, model.DefaultFileName); await File.WriteAllTextAsync(path, "GGUF模拟模型", token);
             return new(path, await AtomicFile.HashFileAsync(path, token));
         }
-        public Task<EmbeddedModelFile> VerifyAsync(EmbeddedModel model, string path, IProgress<ModelDownloadProgress> progress, CancellationToken token)
-            => throw new NotSupportedException();
     }
 }

@@ -18,6 +18,7 @@ internal static class UserErrorMessages
         AsrServiceException service => Http(service.StatusCode, "ElevenLabs"),
         TranslationServiceException service => Http(service.StatusCode, "翻译服务"),
         LocalTranslationException local => Local(local.Category),
+        PromptCapacityException => exception.Message,
         ArgumentException => exception.Message,
         FormatException or OverflowException => "数值格式无效，请检查输入的数字。",
         TimeoutException => "处理超时，请检查网络或调大超时时间后重试。",
@@ -36,6 +37,7 @@ internal static class UserErrorMessages
         if (category.StartsWith("Local:", StringComparison.Ordinal)) return Local(category[6..]);
         return category switch
         {
+            "本地上下文不足" => "字幕和提示词超过上下文长度，请调大上下文长度或缩短提示词。",
             "网络失败" => $"无法连接{service}，请检查网络和服务地址。",
             "超时" or "请求超时" or "取消或超时" => "请求未完成，请稍后重试或调大超时时间。",
             "配置或凭据无效" or "会话凭据或处理状态无效" => $"请检查{service}的 API 密钥和设置。",
@@ -64,9 +66,16 @@ internal static class UserErrorMessages
 
     private static string Local(string category) => category switch
     {
-        "GpuMemory" => "显存不足，请关闭占用显卡的程序，或降低 GPU 卸载层数和上下文长度。",
-        "ModelIdentity" or "ModelArchitecture" => "模型文件不完整或与所选模型不符，请重新下载或选择对应模型文件。",
-        "NativeLibrary" => "本地翻译组件加载失败，请重新解压完整的程序包。",
+        "GpuMemory" => "显存不足，请降低本地并发数、GPU 卸载层数或上下文长度，并关闭其他占用显卡的程序。",
+        "ModelLoad" => "llama.cpp 无法加载模型，请重新选择模型文件或下载模型，并查看运行日志。",
+        "ModelFile" => "无法读取模型文件，请检查路径、读取权限和文件占用。",
+        "ModelArchitecture" => "当前 llama.cpp 不支持这个模型的架构，请更新运行包或选择其他模型文件。",
+        "NativeLibrary" => "本地翻译组件加载失败，请下载 llama.cpp，或选择完整运行包中的 llama-server.exe。",
+        "ServerMissing" => "找不到 llama-server，请在设置中下载 llama.cpp 或选择 llama-server.exe。",
+        "ServerChanged" => "llama.cpp 运行包已改变，请重新选择完整运行包并测试本地翻译。",
+        "ServerIncompatible" => "所选运行程序不兼容，请下载当前 llama.cpp Vulkan 运行包。",
+        "ServerCapacity" => "本地服务可用容量不足，请检查运行包版本，并降低并发数或上下文长度。",
+        "ServerRequest" or "ServerExited" => "本地服务已退出或请求失败，请检查模型设置和显存，并重新测试本地翻译。",
         "VulkanOffload" => "无法使用显卡运行模型，请检查 Vulkan 支持和显卡驱动。",
         "WindowsX64Required" => "本地翻译需要 Windows x64 系统。",
         _ => "本地翻译失败，请检查显卡驱动和模型文件，并查看运行日志。"

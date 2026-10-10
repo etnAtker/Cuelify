@@ -6,17 +6,16 @@ param(
 $ErrorActionPreference = 'Stop'
 $releaseRoot = (Resolve-Path -LiteralPath $ReleasePath).Path
 $requiredAssets = @('Cuelify.Desktop.exe', 'coreclr.dll', 'hostfxr.dll', 'Assets/silero_vad.onnx',
-    'onnxruntime.dll', 'libSkiaSharp.dll', 'README.md', 'LICENSE', 'THIRD-PARTY-NOTICES.md', 'licenses/packages.json',
-    'runtimes/win-x64/native/vulkan/llama.dll', 'runtimes/win-x64/native/vulkan/ggml-vulkan.dll')
+    'onnxruntime.dll', 'libSkiaSharp.dll', 'README.md', 'LICENSE', 'THIRD-PARTY-NOTICES.md', 'licenses/packages.json')
 foreach ($asset in $requiredAssets) {
     if (!(Test-Path -LiteralPath (Join-Path $releaseRoot $asset))) { throw "缺少发行资产：$asset" }
 }
-if ((Get-ChildItem -LiteralPath (Join-Path $releaseRoot 'runtimes') -Directory | Where-Object Name -NE 'win-x64')) {
+if ((Test-Path -LiteralPath (Join-Path $releaseRoot 'runtimes')) -and (Get-ChildItem -LiteralPath (Join-Path $releaseRoot 'runtimes') -Directory | Where-Object Name -NE 'win-x64')) {
     throw '发行包包含非 win-x64 原生资产。'
 }
 if ((Get-ChildItem -LiteralPath $releaseRoot -File -Recurse | Where-Object {
-    $_.Extension -eq '.gguf' -or $_.Name -match 'Cuelify\..*Tests|xunit|testhost|settings\.json'
-})) { throw '发行包包含模型、测试程序集或用户设置。' }
+    $_.Extension -eq '.gguf' -or $_.Name -match 'Cuelify\..*Tests|xunit|testhost|settings\.json|^LLamaSharp|^ggml|^llama-server\.exe$'
+})) { throw '发行包包含模型、测试程序集、用户设置或应独立下载的模型运行库。' }
 $vadHash = (Get-FileHash -LiteralPath (Join-Path $releaseRoot 'Assets/silero_vad.onnx') -Algorithm SHA256).Hash
 if ($vadHash -ne '1A153A22F4509E292A94E67D6F9B85E8DEB25B4988682B7E174C65279D8788E3') { throw 'Silero 发行资产哈希不符。' }
 

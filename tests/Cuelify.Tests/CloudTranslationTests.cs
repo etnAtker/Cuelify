@@ -22,7 +22,7 @@ public sealed class CloudTranslationTests
         }) }.ToJsonString(), Encoding.UTF8, "application/json")
     };
     private static CloudTranslationOptions Options => new() { BaseUrl = "https://provider.example/v1", Model = "user-model" };
-    private static TranslationRequest Request => new PromptBuilder().Build(PromptPresets.Cloud, new(), [TranslationPromptTests.Cue()], []);
+    private static TranslationRequest Request => new PromptBuilder().Build(PromptPresets.BatchSubtitles, new(), [TranslationPromptTests.Cue()], []);
 
     [Theory]
     [InlineData("https://provider.example/v1", "https://provider.example/v1/chat/completions")]

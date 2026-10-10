@@ -1,0 +1,9 @@
+<UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:vm="using:Cuelify.Desktop.ViewModels" x:Class="Cuelify.Desktop.Views.PreparationStatusView" x:DataType="vm:MainWindowViewModel">
+  <StackPanel Spacing="8" IsVisible="{Binding IsPreparing}" Margin="0,12,0,12">
+    <Grid ColumnDefinitions="*,Auto">
+      <TextBlock x:Name="PreparationMessage" Text="{Binding PreparationStatus}" TextWrapping="Wrap" Margin="0,0,12,0" AutomationProperties.LiveSetting="Polite" />
+      <TextBlock Grid.Column="1" Classes="muted" Text="{Binding PreparationElapsed}" />
+    </Grid>
+    <ProgressBar IsIndeterminate="True" Height="4" AutomationProperties.Name="正在准备" />
+  </StackPanel>
+</UserControl>

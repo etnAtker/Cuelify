@@ -1,4 +1,4 @@
-<UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:vm="using:Cuelify.Desktop.ViewModels" xmlns:views="using:Cuelify.Desktop.Views" x:Class="Cuelify.Desktop.Views.SettingsView" x:DataType="vm:MainWindowViewModel">
+<UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:vm="using:Cuelify.Desktop.ViewModels" xmlns:views="using:Cuelify.Desktop.Views" xmlns:translation="using:Cuelify.Core.Translation" x:Class="Cuelify.Desktop.Views.SettingsView" x:DataType="vm:MainWindowViewModel">
   <Grid RowDefinitions="Auto,Auto,*,Auto" Margin="32,24">
     <Grid ColumnDefinitions="*,Auto">
       <StackPanel Spacing="6">
@@ -80,8 +80,18 @@
               </StackPanel>
             </StackPanel>
             <StackPanel Spacing="8" IsVisible="{Binding IsLocal}">
-              <TextBlock Text="内嵌模型" />
-              <ComboBox x:Name="EmbeddedModelSelector" ItemsSource="{Binding EmbeddedModels}" SelectedItem="{Binding SelectedEmbeddedModel}" HorizontalAlignment="Stretch" AutomationProperties.Name="内嵌模型" />
+              <TextBlock Text="llama.cpp 运行程序" />
+              <TextBox x:Name="LlamaServerPath" Text="{Binding Settings.LlamaServerPath}" AutomationProperties.Name="llama-server 程序路径" />
+              <WrapPanel ItemSpacing="8" LineSpacing="8">
+                <Button x:Name="DownloadLlamaButton" Content="下载 llama.cpp" Command="{Binding DownloadLlamaCommand}" />
+                <Button x:Name="ChooseLlamaServerButton" Content="选择运行程序" Command="{Binding ChooseLlamaServerCommand}" />
+              </WrapPanel>
+              <TextBlock Classes="muted" Text="下载官方 Windows x64 Vulkan 运行包，解压到设置文件夹中的 llama.cpp/。也可选择完整运行包中的 llama-server.exe。" TextWrapping="Wrap" />
+              <TextBlock Classes="muted" Text="{Binding LlamaRuntimeStatus}" TextWrapping="Wrap" />
+              <ProgressBar x:Name="LlamaInstallProgress" IsVisible="{Binding IsLlamaInstalling}" IsIndeterminate="{Binding LlamaInstallIndeterminate}" Value="{Binding LlamaInstallPercent}" Minimum="0" Maximum="100" />
+              <TextBlock Classes="muted" Text="{Binding LlamaInstallStatus}" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite" />
+              <TextBlock Text="本地模型" />
+              <ComboBox x:Name="EmbeddedModelSelector" ItemsSource="{Binding EmbeddedModels}" SelectedItem="{Binding SelectedEmbeddedModel}" HorizontalAlignment="Stretch" AutomationProperties.Name="本地模型" />
               <TextBlock Classes="muted" Text="需要支持 Vulkan 的显卡。模型越大，所需显存和下载空间通常越多。" />
               <Button x:Name="DownloadModelButton" Content="下载模型" Command="{Binding DownloadModelCommand}" />
               <Button Content="选择模型文件…" Command="{Binding ChooseModelCommand}" />
@@ -91,13 +101,21 @@
               <TextBlock Classes="muted" Text="{Binding ModelDownloadStatus}" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite" />
               <TextBlock Text="模型文件路径" />
               <TextBox Text="{Binding Settings.ModelPath}" AutomationProperties.Name="模型文件路径" />
-              <TextBlock Text="GPU 卸载层数" />
-              <NumericUpDown Value="{Binding Settings.GpuLayers}" Minimum="1" Maximum="99" AutomationProperties.Name="GPU 卸载层数" />
-              <TextBlock Text="上下文长度 / token" />
-              <NumericUpDown Value="{Binding Settings.ContextSize}" Minimum="512" Maximum="32768" Increment="512" AutomationProperties.Name="上下文长度 / token" />
-              <TextBlock Text="最大输出长度 / token" />
-              <NumericUpDown Value="{Binding Settings.LocalMaximumTokens}" Minimum="8" Maximum="4096" AutomationProperties.Name="最大输出长度 / token" />
             </StackPanel>
+            <TextBlock Text="关联提示词" />
+            <ComboBox x:Name="AssociatedPromptSelector" ItemsSource="{Binding PromptItems}" SelectedItem="{Binding AssociatedPrompt}" HorizontalAlignment="Stretch" AutomationProperties.Name="模型关联提示词" />
+            <Button Content="查看模板" Command="{Binding ViewAssociatedPromptCommand}" />
+            <TextBlock Classes="section" Text="推理参数" Margin="0,8,0,0" />
+            <TextBlock Text="并发请求数" />
+            <NumericUpDown x:Name="InferenceConcurrency" Value="{Binding InferenceConcurrency}" Minimum="1" Maximum="8" FormatString="0" ParsingNumberStyle="Integer" AutomationProperties.Name="并发请求数" AutomationProperties.HelpText="{Binding ConcurrencyHint}" />
+            <TextBlock Classes="muted" Text="{Binding ConcurrencyHint}" TextWrapping="Wrap" />
+            <TextBlock Text="单次请求超时（秒）" />
+            <NumericUpDown Value="{Binding Settings.TimeoutSeconds}" Minimum="1" Maximum="600" FormatString="0" ParsingNumberStyle="Integer" AutomationProperties.Name="单次请求超时（秒）" AutomationProperties.HelpText="{Binding TimeoutHint}" />
+            <TextBlock Classes="muted" Text="{Binding TimeoutHint}" TextWrapping="Wrap" />
+            <TextBlock Text="最大输出长度（token）" />
+            <NumericUpDown x:Name="LocalOutputTokens" IsVisible="{Binding IsLocal}" Value="{Binding Settings.LocalMaximumTokens}" Minimum="1" Maximum="{Binding LocalOutputTokenMaximum}" FormatString="0" ParsingNumberStyle="Integer" AutomationProperties.Name="最大输出长度（token）" AutomationProperties.HelpText="{Binding OutputTokensHint}" />
+            <NumericUpDown x:Name="CloudOutputTokens" IsVisible="{Binding IsCloud}" Value="{Binding CloudOutputTokens}" Minimum="1" Maximum="2147483647" FormatString="0" ParsingNumberStyle="Integer" Watermark="使用服务默认值" AutomationProperties.Name="最大输出长度（token）" AutomationProperties.HelpText="{Binding OutputTokensHint}" />
+            <TextBlock Classes="muted" Text="{Binding OutputTokensHint}" TextWrapping="Wrap" />
             <TextBlock Classes="muted" Text="{Binding EngineCredentialHint}" TextWrapping="Wrap" />
             <Button Content="{Binding TestEngineButtonText}" Command="{Binding TestEngineCommand}" />
             <TextBlock Classes="muted" Text="{Binding EngineStatus}" />
@@ -106,23 +124,23 @@
               <StackPanel Spacing="8">
                 <TextBlock Text="译文风格" />
                 <TextBox Text="{Binding Settings.TargetStyle}" AutomationProperties.Name="译文风格" />
-                <TextBlock Text="超时 / 秒" />
-                <NumericUpDown Value="{Binding Settings.TimeoutSeconds}" Minimum="1" Maximum="600" AutomationProperties.Name="超时 / 秒" />
                 <TextBlock Text="最多请求次数（含首次请求）" />
                 <NumericUpDown Value="{Binding Settings.MaximumAttempts}" Minimum="1" Maximum="5" AutomationProperties.Name="最多请求次数（含首次请求）" />
+                <TextBlock Classes="muted" Text="失败后的重试计入次数；批量译文不完整时可能拆分补翻。" TextWrapping="Wrap" />
                 <TextBlock Text="参考前文条数" />
                 <NumericUpDown Value="{Binding Settings.ContextCues}" Minimum="0" Maximum="8" AutomationProperties.Name="参考前文条数" />
                 <TextBlock Text="参考后文条数" />
                 <NumericUpDown Value="{Binding Settings.FollowingContextCues}" Minimum="0" Maximum="8" AutomationProperties.Name="参考后文条数" />
-                <TextBlock Text="上下文字符上限" />
-                <NumericUpDown Value="{Binding Settings.MaximumContextCharacters}" Minimum="0" Maximum="20000" AutomationProperties.Name="上下文字符上限" />
+                <TextBlock Text="参考上下文字符上限" />
+                <NumericUpDown Value="{Binding Settings.MaximumContextCharacters}" Minimum="0" Maximum="20000" AutomationProperties.Name="参考上下文字符上限" />
+                <StackPanel IsVisible="{Binding IsLocal}" Spacing="8">
+                  <TextBlock Text="模型上下文容量（token）" />
+                  <NumericUpDown x:Name="LocalContextSize" Value="{Binding Settings.ContextSize}" Minimum="512" Maximum="32768" Increment="512" AutomationProperties.Name="模型上下文容量（token）" />
+                  <TextBlock Classes="muted" Text="每个请求单独计算，包含提示词、参考上下文和输出。提高容量会增加显存占用。" TextWrapping="Wrap" />
+                  <TextBlock Text="GPU 卸载层数" />
+                  <NumericUpDown Value="{Binding Settings.GpuLayers}" Minimum="1" Maximum="99" AutomationProperties.Name="GPU 卸载层数" />
+                </StackPanel>
                 <StackPanel IsVisible="{Binding IsCloud}" Spacing="8">
-                  <TextBlock Text="每批字幕条数" />
-                  <NumericUpDown Value="{Binding Settings.BatchSize}" Minimum="1" Maximum="100" AutomationProperties.Name="每批字幕条数" />
-                  <TextBlock Text="批次字符上限" />
-                  <NumericUpDown Value="{Binding Settings.MaximumBatchCharacters}" Minimum="100" Maximum="50000" AutomationProperties.Name="批次字符上限" />
-                  <TextBlock Text="同时翻译的批次数" />
-                  <NumericUpDown Value="{Binding Settings.TranslationConcurrency}" Minimum="1" Maximum="2" AutomationProperties.Name="同时翻译的批次数" />
                   <TextBlock Classes="muted" Text="可选参数留空时使用服务默认值。" />
                   <StackPanel IsEnabled="{Binding CanEditSampling}" Spacing="8">
                     <TextBlock Text="温度（temperature）" />
@@ -135,8 +153,6 @@
                   <TextBlock Text="采样范围（top_p）" />
                   <TextBlock Classes="muted" Text="{Binding TopPHint}" />
                   <TextBox Text="{Binding Settings.TopP}" IsEnabled="{Binding CanEditTopP}" AutomationProperties.Name="采样范围（top_p）" />
-                  <TextBlock Text="最大输出长度（max_tokens）" />
-                  <TextBox Text="{Binding Settings.MaximumTokens}" AutomationProperties.Name="最大输出长度（max_tokens）" />
                   <StackPanel IsVisible="{Binding IsCompatible}" Spacing="8">
                     <TextBlock Text="思考参数类型" />
                     <ComboBox ItemsSource="{Binding ReasoningCapabilityNames}" SelectedIndex="{Binding ReasoningCapabilityIndex}" AutomationProperties.Name="思考参数类型" />
@@ -153,55 +169,122 @@
         </ScrollViewer>
       </TabItem>
       <TabItem Header="提示词">
-        <ScrollViewer HorizontalScrollBarVisibility="Disabled">
-          <StackPanel Classes="settings-form" Spacing="10" IsEnabled="{Binding CanConfigure}">
-            <TextBlock Text="翻译引擎" />
-            <ComboBox ItemsSource="{Binding ProviderNames}" SelectedIndex="{Binding ProviderIndex}" HorizontalAlignment="Stretch" AutomationProperties.Name="提示词所属引擎" />
-                <TextBlock Classes="muted" Text="每个翻译引擎分别保存提示词。保存后用于新的处理。" IsVisible="{Binding IsCloud}" />
-                <StackPanel Spacing="8" IsVisible="{Binding IsLocal}">
-                  <TextBlock Text="内嵌模型" />
-                  <ComboBox x:Name="PromptModelSelector" ItemsSource="{Binding EmbeddedModels}" SelectedItem="{Binding SelectedEmbeddedModel}" HorizontalAlignment="Stretch" AutomationProperties.Name="提示词所属模型" />
-                  <TextBlock Classes="muted" Text="每个模型分别保存提示词。恢复默认只调整当前模型，保存后用于新的处理。" TextWrapping="Wrap" />
-                </StackPanel>
-                <ComboBox x:Name="PromptPresetSelector" ItemsSource="{Binding AvailablePresets}" SelectedItem="{Binding PresetSelection}" AutomationProperties.Name="提示词预设" PlaceholderText="选择预设" />
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                  <Button Content="恢复默认" Command="{Binding ResetPromptCommand}" />
-                  <Button Content="简洁字幕预设" Command="{Binding ResetPromptCommand}" CommandParameter="通用简洁字幕" IsVisible="{Binding IsCloud}" />
-                </StackPanel>
-                <TextBlock Text="模板名称" />
-                <TextBox Text="{Binding ProfileName}" AutomationProperties.Name="模板名称" />
-                <TextBlock Text="可用变量" />
-                <Grid ColumnDefinitions="*,Auto">
-                  <TextBlock Classes="muted" Text="悬停查看说明，点击复制。" />
-                  <TextBlock Grid.Column="1" Classes="muted" Text="{Binding PromptVariableStatus}" AutomationProperties.LiveSetting="Polite" HorizontalAlignment="Right" />
+        <Grid ColumnDefinitions="200,*" IsEnabled="{Binding CanConfigure}">
+          <Grid RowDefinitions="Auto,Auto,Auto,*" Margin="0,0,16,0">
+            <TextBox x:Name="PromptSearchBox" Text="{Binding PromptSearch}" Watermark="搜索模板" AutomationProperties.Name="搜索提示词模板" />
+            <ComboBox Grid.Row="1" ItemsSource="{Binding PromptFilterNames}" SelectedIndex="{Binding PromptFilterIndex}" Margin="0,8" HorizontalAlignment="Stretch" AutomationProperties.Name="模板分类" />
+            <Button Grid.Row="2" Content="新建提示词" Command="{Binding NewPromptCommand}" Margin="0,0,0,8" />
+            <ListBox x:Name="PromptLibraryList" Grid.Row="3" ItemsSource="{Binding VisiblePromptItems}" SelectedItem="{Binding VisibleSelectedPrompt}" SelectionChanged="OnPromptSelectionChanged" AutomationProperties.Name="提示词模板列表">
+              <ListBox.ItemTemplate>
+                <DataTemplate x:DataType="translation:PromptProfile">
+                  <TextBlock Text="{Binding Name}" TextWrapping="Wrap" />
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+          </Grid>
+          <Grid Grid.Column="1" RowDefinitions="Auto,*">
+            <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,12">
+              <StackPanel Spacing="4" VerticalAlignment="Center" Margin="0,0,12,0">
+                <TextBlock Classes="section" Text="{Binding ProfileName}" TextTrimming="CharacterEllipsis" />
+                <TextBlock Classes="muted" Text="{Binding PromptKind}" TextWrapping="Wrap" />
+              </StackPanel>
+              <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Top">
+                <Button Content="创建副本" Command="{Binding CopyPromptCommand}" />
+                <Button x:Name="MorePromptButton" Content="更多" IsVisible="{Binding !IsBuiltInPrompt}" IsEnabled="{Binding CanManagePrompts}">
+                  <Button.Flyout>
+                    <MenuFlyout>
+                      <MenuItem x:Name="DeletePromptMenuItem" Header="删除提示词" Command="{Binding DeletePromptCommand}" />
+                    </MenuFlyout>
+                  </Button.Flyout>
+                </Button>
+              </StackPanel>
+            </Grid>
+            <TabControl x:Name="PromptEditorTabs" Grid.Row="1" SelectedIndex="{Binding PromptSectionIndex}">
+              <TabItem Header="正文">
+                <Grid RowDefinitions="Auto,Auto,*,Auto,1.5*,Auto">
+                  <Button x:Name="PromptVariablesButton" Content="变量说明" HorizontalAlignment="Left" Margin="0,0,0,8">
+                    <Button.Flyout>
+                      <Flyout Placement="Bottom">
+                        <ScrollViewer MaxHeight="260" MaxWidth="480" HorizontalScrollBarVisibility="Disabled">
+                        <StackPanel Spacing="8">
+                          <TextBlock Classes="muted" Text="{Binding PromptVariableHint}" TextWrapping="Wrap" />
+                    <Grid ColumnDefinitions="*,Auto">
+                      <TextBlock Text="可用变量" />
+                      <TextBlock Grid.Column="1" Classes="muted" Text="{Binding PromptVariableStatus}" AutomationProperties.LiveSetting="Polite" HorizontalAlignment="Right" />
+                    </Grid>
+                    <ItemsControl x:Name="PromptVariableList" ItemsSource="{Binding PromptVariables}">
+                      <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel ItemSpacing="8" LineSpacing="8" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:PromptVariableItem">
+                          <Button x:Name="VariableButton" Classes="prompt-variable" CommandParameter="{Binding .}"
+                                  Command="{Binding $parent[ItemsControl].((vm:MainWindowViewModel)DataContext).CopyPromptVariableCommand}"
+                                  AutomationProperties.Name="{Binding CopyLabel}" AutomationProperties.HelpText="{Binding Description}"
+                                  GotFocus="OnPromptVariableGotFocus" LostFocus="OnPromptVariableLostFocus" KeyDown="OnPromptVariableKeyDown">
+                            <TextBlock Text="{Binding Placeholder}" />
+                            <ToolTip.Tip>
+                              <StackPanel DataContext="{Binding #VariableButton.((vm:PromptVariableItem)DataContext)}" MaxWidth="360" Spacing="6">
+                                <TextBlock Text="{Binding Placeholder}" FontWeight="SemiBold" />
+                                <TextBlock Text="{Binding Description}" TextWrapping="Wrap" />
+                                <TextBlock Classes="muted" Text="点击复制完整占位符。" />
+                              </StackPanel>
+                            </ToolTip.Tip>
+                          </Button>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                        </StackPanel>
+                        </ScrollViewer>
+                      </Flyout>
+                    </Button.Flyout>
+                  </Button>
+                  <TextBlock Grid.Row="1" Text="系统提示词" Margin="0,0,0,4" />
+                  <TextBox x:Name="PromptSystemEditor" Grid.Row="2" Text="{Binding SystemTemplate}" IsReadOnly="{Binding !CanEditPrompt}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="64" AutomationProperties.Name="系统提示词" />
+                  <TextBlock Grid.Row="3" Text="用户提示词模板" Margin="0,8,0,4" />
+                  <TextBox x:Name="PromptUserEditor" Grid.Row="4" Text="{Binding UserTemplate}" IsReadOnly="{Binding !CanEditPrompt}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="80" AutomationProperties.Name="用户提示词模板" />
+                  <TextBlock Grid.Row="5" Classes="error" Text="{Binding PromptContentError}" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite" />
                 </Grid>
-                <ItemsControl x:Name="PromptVariableList" ItemsSource="{Binding PromptVariables}">
-                  <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel ItemSpacing="8" LineSpacing="8" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
-                  <ItemsControl.ItemTemplate>
-                    <DataTemplate x:DataType="vm:PromptVariableItem">
-                      <Button x:Name="VariableButton" Classes="prompt-variable" CommandParameter="{Binding .}"
-                              Command="{Binding $parent[ItemsControl].((vm:MainWindowViewModel)DataContext).CopyPromptVariableCommand}"
-                              AutomationProperties.Name="{Binding CopyLabel}" AutomationProperties.HelpText="{Binding Description}"
-                              GotFocus="OnPromptVariableGotFocus" LostFocus="OnPromptVariableLostFocus" KeyDown="OnPromptVariableKeyDown">
-                        <TextBlock Text="{Binding Placeholder}" />
-                        <ToolTip.Tip>
-                          <StackPanel DataContext="{Binding #VariableButton.((vm:PromptVariableItem)DataContext)}" MaxWidth="360" Spacing="6">
-                            <TextBlock Text="{Binding Placeholder}" FontWeight="SemiBold" />
-                            <TextBlock Text="{Binding Description}" TextWrapping="Wrap" />
-                            <TextBlock Classes="muted" Text="点击复制完整占位符。" />
-                          </StackPanel>
-                        </ToolTip.Tip>
-                      </Button>
-                    </DataTemplate>
-                  </ItemsControl.ItemTemplate>
-                </ItemsControl>
-                <TextBlock Text="系统提示词" />
-                <TextBlock Classes="muted" Text="{Binding SystemPromptHint}" />
-                <TextBox Text="{Binding SystemTemplate}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="160" AutomationProperties.Name="系统提示词" />
-                <TextBlock Text="用户提示词模板" />
-                <TextBox Text="{Binding UserTemplate}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="180" AutomationProperties.Name="用户提示词模板" />
-          </StackPanel>
-        </ScrollViewer>
+              </TabItem>
+              <TabItem Header="模板设置">
+                <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+                  <StackPanel Spacing="10">
+                    <TextBlock Text="模板名称" />
+                    <TextBox x:Name="PromptNameEditor" Text="{Binding ProfileName}" IsReadOnly="{Binding !CanEditPrompt}" AutomationProperties.Name="模板名称" />
+                    <TextBlock Classes="error" Text="{Binding PromptNameError}" TextWrapping="Wrap" />
+                    <TextBlock Text="说明" />
+                    <TextBox Text="{Binding PromptDescription}" IsReadOnly="{Binding !CanEditPrompt}" TextWrapping="Wrap" AutomationProperties.Name="模板说明" />
+                    <CheckBox x:Name="BatchTranslationToggle" Content="批量翻译" IsChecked="{Binding BatchTranslation}" IsEnabled="{Binding CanEditPrompt}" />
+                    <StackPanel IsVisible="{Binding BatchTranslation}" IsEnabled="{Binding CanEditPrompt}" Spacing="8">
+                      <TextBlock Text="每批字幕条数上限" />
+                      <NumericUpDown Value="{Binding PromptBatchSize}" Minimum="1" Maximum="100" AutomationProperties.Name="每批字幕条数上限" />
+                      <TextBlock Text="每批字符上限" />
+                      <NumericUpDown Value="{Binding PromptMaximumBatchCharacters}" Minimum="100" Maximum="50000" AutomationProperties.Name="每批字符上限" />
+                    </StackPanel>
+                    <TextBlock Classes="muted" Text="{Binding PromptVariableHint}" TextWrapping="Wrap" />
+                    <Expander Header="模板使用情况">
+                      <TextBlock Classes="muted" Text="{Binding PromptReferences}" TextWrapping="Wrap" />
+                    </Expander>
+                  </StackPanel>
+                </ScrollViewer>
+              </TabItem>
+              <TabItem Header="提示词预览">
+                <Grid RowDefinitions="Auto,Auto,Auto,*,Auto,1.5*">
+                  <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,8">
+                    <TextBlock Classes="muted" Text="样例：英语 → 中文。预览使用当前草稿，不调用模型。" TextWrapping="Wrap" Margin="0,0,12,0" />
+                    <Button x:Name="CopyPromptPreviewButton" Grid.Column="1" Content="复制预览" Command="{Binding CopyPromptPreviewCommand}" />
+                  </Grid>
+                  <StackPanel Grid.Row="1">
+                    <TextBlock Classes="error" Text="{Binding PromptPreviewError}" IsVisible="{Binding HasPromptPreviewError}" TextWrapping="Wrap" />
+                    <TextBlock Classes="muted" Text="{Binding PromptPreviewStatus}" IsVisible="{Binding HasPromptPreviewStatus}" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite" />
+                  </StackPanel>
+                  <TextBlock Grid.Row="2" Text="系统消息" Margin="0,0,0,4" />
+                  <TextBox x:Name="PromptSystemPreviewBox" Grid.Row="3" Text="{Binding PromptSystemPreview}" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="64" AutomationProperties.Name="系统消息预览" />
+                  <TextBlock Grid.Row="4" Text="用户消息" Margin="0,8,0,4" />
+                  <TextBox x:Name="PromptUserPreviewBox" Grid.Row="5" Text="{Binding PromptUserPreview}" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="80" AutomationProperties.Name="用户消息预览" />
+                </Grid>
+              </TabItem>
+            </TabControl>
+          </Grid>
+        </Grid>
       </TabItem>
       <TabItem Header="常规">
         <ScrollViewer HorizontalScrollBarVisibility="Disabled">
@@ -226,10 +309,13 @@
         </ScrollViewer>
       </TabItem>
     </TabControl>
-    <Grid Grid.Row="3" ColumnDefinitions="*,Auto,Auto">
-      <TextBlock Classes="muted" Text="{Binding SettingsStatus}" VerticalAlignment="Center" />
-      <Button Grid.Column="1" Content="取消" Command="{Binding CancelCommand}" IsVisible="{Binding IsBusy}" Margin="0,0,12,0" />
-      <Button Grid.Column="2" Content="保存设置" Command="{Binding SaveSettingsCommand}" Classes="accent" />
-    </Grid>
+    <StackPanel Grid.Row="3">
+      <views:PreparationStatusView x:Name="SettingsPreparation" />
+      <Grid ColumnDefinitions="*,Auto,Auto">
+        <TextBlock Classes="muted" Text="{Binding SettingsFooterStatus}" VerticalAlignment="Center" TextWrapping="Wrap" Margin="0,0,12,0" />
+        <Button Grid.Column="1" Content="取消" Command="{Binding CancelCommand}" IsVisible="{Binding IsBusy}" Margin="0,0,12,0" />
+        <Button x:Name="SettingsSaveButton" Grid.Column="2" Content="保存设置" Command="{Binding SaveSettingsCommand}" Classes="accent" />
+      </Grid>
+    </StackPanel>
   </Grid>
 </UserControl>

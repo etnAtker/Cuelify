@@ -7,7 +7,10 @@ namespace Cuelify.Core.Translation;
 
 public static class PromptPresets
 {
-    public static PromptProfile Cloud { get; } = new("通用字幕批量翻译", """
+    public const string BatchId = "builtin:batch-subtitles";
+    public const string SimpleId = "builtin:single-simple";
+    public const string ContextId = "builtin:single-context";
+    public static PromptProfile BatchSubtitles { get; } = new("通用字幕批量翻译", """
         你是视频字幕翻译编辑。把输入字幕从{source_language}翻译为{target_language}。
         忠实传达语义、语气与人物关系；译文自然简洁，适合屏幕阅读。
         结合上下文处理代词与省略；保持专名一致；不要无故删改、弱化原意。
@@ -23,18 +26,13 @@ public static class PromptPresets
 
         请翻译这些字幕，严格保留所有 ID：
         {cues_json}
-        """, TranslationOutputFormat.CueIdJson);
-    public static PromptProfile Concise { get; } = Cloud with
-    {
-        Name = "通用简洁字幕", SystemTemplate = Cloud.SystemTemplate + "\n采用简短口语表达，避免冗长译文。风格要求：{target_style}"
-    };
-    public static PromptProfile LegacyLocal { get; } = new("Hy-MT2 单条纯译文", "", """
+        """, true) { Id = BatchId, Description = "一次翻译多条字幕，结合前后文保持表达一致。" };
+    public static PromptProfile SingleSimple { get; } = new("简单单条翻译", "", """
         请将下面的字幕翻译成{target_language}。保持原文意思、语气和专有名词，语言自然简短。只返回翻译后的文本，不要解释或附加编号。
 
         {source_text}
-        """, TranslationOutputFormat.PlainText);
-    public static PromptProfile LocalSimple { get; } = LegacyLocal with { Name = "内嵌模型简单翻译" };
-    public static PromptProfile Local { get; } = new("内嵌模型字幕翻译", "", """
+        """, false) { Id = SimpleId, Description = "逐条翻译，只返回译文。" };
+    public static PromptProfile SingleContext { get; } = new("上下文单条翻译", "", """
         你是视频字幕翻译编辑。将当前字幕从{source_language}翻译为{target_language}。
         忠实传达原意、语气与人物关系；译文自然简洁，适合屏幕阅读。
         结合参考上下文理解代词、省略和专名，保持称呼与术语一致；信息不足时不要编造。
@@ -50,7 +48,10 @@ public static class PromptPresets
         {source_text}
 
         只输出当前字幕的译文，不合并前后文，不输出解释、编号、Markdown或时间码。
-        """, TranslationOutputFormat.PlainText);
+        """, false) { Id = ContextId, Description = "逐条翻译，结合前后文理解省略、指代与专名。" };
+    public static IReadOnlyList<PromptProfile> All { get; } = [BatchSubtitles, SingleSimple, SingleContext];
+    public static PromptProfile Get(string id) => All.FirstOrDefault(profile => profile.Id == id) ?? throw new ArgumentException("内置提示词不存在。");
+    public static bool IsBuiltIn(string id) => All.Any(profile => profile.Id == id);
 }
 
 public sealed class PromptBuilder
@@ -62,9 +63,14 @@ public sealed class PromptBuilder
     public static void Validate(PromptProfile profile)
     {
         if (string.IsNullOrWhiteSpace(profile.Name) || string.IsNullOrWhiteSpace(profile.UserTemplate) ||
-            profile.SystemTemplate is null || !Enum.IsDefined(profile.OutputFormat)) throw new ArgumentException("提示词模板无效。");
+            profile.SystemTemplate is null || string.IsNullOrWhiteSpace(profile.Id) || profile.Description is null) throw new ArgumentException("提示词模板无效。");
+        if (profile.BatchTranslation && (profile.BatchSize is < 1 or > 100 || profile.MaximumBatchCharacters is < 100 or > 50000))
+            throw new ArgumentException("每批条数应为 1～100，字符上限应为 100～50000。");
         foreach (Match match in Variable.Matches(profile.SystemTemplate + "\n" + profile.UserTemplate))
             if (!Variables.Contains(match.Groups[1].Value)) throw new ArgumentException($"不支持提示词变量：{match.Groups[1].Value}");
+        var incompatible = profile.BatchTranslation ? "{source_text}" : "{cues_json}";
+        if ((profile.SystemTemplate + "\n" + profile.UserTemplate).Contains(incompatible, StringComparison.Ordinal))
+            throw new ArgumentException($"当前翻译方式不支持 {incompatible}，请调整批量翻译开关或模板内容。");
         var required = profile.OutputFormat == TranslationOutputFormat.CueIdJson ? "{cues_json}" : "{source_text}";
         if (!profile.UserTemplate.Contains(required, StringComparison.Ordinal)) throw new ArgumentException($"用户模板必须包含 {required}。");
     }

@@ -102,15 +102,15 @@ public sealed class DesktopTests
     }
 
     [AvaloniaFact]
-    public async Task LegacyLanguageCodeMigratesWithoutChangingPaidCacheIdentity()
+    public async Task ExplicitSourceLanguageOverridesConflictingCodeBeforeRecognition()
     {
         using var fixture = new Fixture();
         await AtomicFile.WriteJsonAsync(Path.Combine(fixture.Root, "settings.json"),
-            new AppSettings { SourceCode = "ja", SourceLanguage = "英语" }, CancellationToken.None);
+            new AppSettings { SourceCode = "eng", SourceLanguage = "日语" }, CancellationToken.None);
         await using var model = fixture.Model(); await model.InitializeCommand.ExecuteAsync(null);
         Assert.Equal("日语", model.DefaultSourceLanguage); Assert.Equal("日语", model.TaskSourceLanguage);
         model.InputPath = "fixture.mp4"; await model.RunCommand.ExecuteAsync(null);
-        Assert.Equal("ja", fixture.Jobs.RecognitionSettings!.SourceCode);
+        Assert.Equal("jpn", fixture.Jobs.RecognitionSettings!.SourceCode);
         Assert.Equal("日语", fixture.Jobs.LastSettings!.SourceLanguage);
         model.DefaultSourceLanguage = "英语"; await model.SaveSettingsCommand.ExecuteAsync(null);
         Assert.Equal("eng", model.Settings.SourceCode);
@@ -266,11 +266,13 @@ public sealed class DesktopTests
     public async Task ConfigurationPersistsProfilesWithoutKeys()
     {
         using var fixture = new Fixture();
-        var settings = new AppSettings { LocalProfile = PromptPresets.Local with { Name = "我的本地模板" }, TargetLanguage = "日文" };
+        var settings = fixture.Store.CreateDefaults(); settings.TargetLanguage = "日文"; settings.Provider = TranslationProvider.Local;
+        var custom = PromptPresets.SingleContext with { Id = "custom-local", Name = "我的本地模板" };
+        settings.SavePrompt(custom); settings.AssociatePrompt(custom.Id);
         await fixture.Store.SaveAsync(settings, ["secret-eleven", "secret-ds"]);
         var loaded = await fixture.Store.LoadAsync();
         Assert.Equal("日文", loaded!.TargetLanguage);
-        Assert.Equal("我的本地模板", loaded.GetLocalProfile().Name);
+        Assert.Equal("我的本地模板", loaded.GetProfile().Name);
         var text = await File.ReadAllTextAsync(Path.Combine(fixture.Root, "settings.json"));
         Assert.DoesNotContain("secret-eleven", text); Assert.DoesNotContain("secret-ds", text);
         Assert.DoesNotContain("ApiKey", text); Assert.DoesNotContain("TranslationKey", text);
@@ -288,7 +290,8 @@ public sealed class DesktopTests
     public async Task AccidentallyPastedCurrentKeyCannotBeSavedInPrompt()
     {
         using var fixture = new Fixture();
-        var settings = new AppSettings { DeepSeekProfile = PromptPresets.Cloud with { SystemTemplate = "secret-from-session" } };
+        var settings = new AppSettings();
+        settings.SavePrompt(PromptPresets.BatchSubtitles with { Id = "secret-test", Name = "误贴模板", SystemTemplate = "secret-from-session" });
         await Assert.ThrowsAsync<ArgumentException>(() => fixture.Store.SaveAsync(settings, ["secret-from-session"]));
     }
     [AvaloniaFact]
@@ -315,8 +318,8 @@ public sealed class DesktopTests
     {
         using var fixture = new Fixture(); await using var model = fixture.Model();
         model.InputPath = "fixture.mp4"; await model.RunCommand.ExecuteAsync(null);
-        model.UserTemplate += "\n新的风格";
-        Assert.True(model.CanExport); Assert.True(model.HasUnsavedSettings);
+        model.CopyPromptCommand.Execute(null); model.UserTemplate += "\n新的风格";
+        Assert.True(model.CanExport); Assert.True(model.HasPromptEdits);
         model.Settings.Temperature = "invalid";
         await model.SaveSettingsCommand.ExecuteAsync(null);
         Assert.Contains("数值格式", model.Error);
@@ -504,12 +507,13 @@ public sealed class DesktopTests
         Assert.DoesNotContain("session-secret", model.Error); Assert.All(model.Log, message => Assert.DoesNotContain("session-secret", message));
     }
     [AvaloniaFact]
-    public async Task SwitchingProvidersRetainsIndependentPromptEdits()
+    public async Task SwitchingProvidersDoesNotChangeIndependentPromptEditor()
     {
         using var fixture = new Fixture(); await using var model = fixture.Model();
-        model.ProfileName = "DS 模板";
-        model.ProviderIndex = 2; Assert.Empty(model.SystemTemplate); Assert.Contains("{source_text}", model.UserTemplate);
-        model.ProviderIndex = 1; Assert.Equal("DS 模板", model.ProfileName);
+        model.CopyPromptCommand.Execute(null); model.ProfileName = "独立模板";
+        var content = model.UserTemplate;
+        model.ProviderIndex = 2; Assert.Equal(content, model.UserTemplate);
+        model.ProviderIndex = 1; Assert.Equal("独立模板", model.ProfileName);
     }
     [AvaloniaFact]
     public async Task RepeatedInitializationWaitsForSameConfigurationReadBeforeSaving()
@@ -556,7 +560,7 @@ internal sealed class Fixture : IDisposable
     public FakeJobs Jobs { get; } = new();
     public FakeDialogs Dialogs { get; } = new();
     public Fixture() { Directory.CreateDirectory(Root); Store = new(Root); }
-    public MainWindowViewModel Model(Cuelify.Infrastructure.Translation.Local.IModelDownloadService? downloads = null)
+    public MainWindowViewModel Model(Cuelify.Infrastructure.Translation.Local.IModelDownloadService? downloads = null, Cuelify.Infrastructure.Translation.Local.ILlamaPackageService? packages = null)
     {
         var credentials = new CredentialStore(Root);
         // 测试夹具同步建立凭证时放到后台，避免文件 I/O 续体等待已被阻塞的 UI 上下文。
@@ -566,12 +570,20 @@ internal sealed class Fixture : IDisposable
             else await credentials.CreateAsync("test-master-password");
             await credentials.SaveAsync(new("fake-eleven", "fake-translation", "fake-translation", "https://api.deepseek.com"));
         }).GetAwaiter().GetResult();
-        return new(Jobs, Store, Dialogs, credentials, downloads);
+        return new(Jobs, Store, Dialogs, credentials, downloads, packages);
     }
     public void Dispose() => Directory.Delete(Root, true);
 }
 internal sealed class FakeDialogs : IWindowDialogs
 {
+    public PromptSwitchChoice SwitchChoice { get; set; } = PromptSwitchChoice.Cancel;
+    public TaskCompletionSource<PromptSwitchChoice>? SwitchCompletion { get; set; }
+    public int SwitchConfirmations { get; private set; }
+    public Task<PromptSwitchChoice> ConfirmPromptSwitchAsync(string templateName)
+    {
+        SwitchConfirmations++; return SwitchCompletion?.Task ?? Task.FromResult(SwitchChoice);
+    }
+    public string? OpenPath { get; set; }
     public string Password { get; set; } = "test-master-password";
     public string NewPassword { get; set; } = "test-new-master-password";
     public bool AcceptPassword { get; set; } = true;
@@ -584,14 +596,21 @@ internal sealed class FakeDialogs : IWindowDialogs
     public Exception? CopyFailure { get; set; }
     public Task CopyTextAsync(string text) { if (CopyFailure is not null) return Task.FromException(CopyFailure); CopiedText = text; return Task.CompletedTask; }
     public bool Confirm { get; set; } = true;
+    public string? ConfirmationMessage { get; private set; }
     public string? SavePath { get; set; }
     public string? SuggestedName { get; private set; }
-    public Task<bool> ConfirmAsync(string message, CancellationToken token = default) => Task.FromResult(Confirm);
-    public Task<string?> OpenAsync(string title, string[] patterns) => Task.FromResult<string?>(null);
+    public Task<bool> ConfirmAsync(string message, CancellationToken token = default) { ConfirmationMessage = message; return Task.FromResult(Confirm); }
+    public Task<string?> OpenAsync(string title, string[] patterns) => Task.FromResult(OpenPath);
     public Task<string?> SaveSrtAsync(string suggestedName) { SuggestedName = suggestedName; return Task.FromResult(SavePath); }
 }
 internal sealed class FakeJobs : IDesktopJobService
 {
+    public TaskCompletionSource PreparationStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public TaskCompletionSource ReleasePreparation { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public TaskCompletionSource ProbeStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public bool BlockPreparation, BlockProbe;
+    public Exception? PreparationFailure;
+    public IProgress<Cuelify.Infrastructure.Translation.Local.LocalPreparationProgress>? PreparationProgress;
     public static SubtitleCue[] Cues { get; } = [new("cue-1", TimeSpan.Zero, TimeSpan.FromSeconds(1), "Hello.", null), new("cue-2", TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(4), "Goodbye.", null)];
     public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     public TaskCompletionSource TranslationStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -609,8 +628,28 @@ internal sealed class FakeJobs : IDesktopJobService
     public AppSettings? LastSettings;
     public AppSettings? RecognitionSettings;
     public AppSettings? PreviewSettings;
+    public AppSettings? EngineSettings;
     public IReadOnlySet<string>? Forced;
-    public Task<MediaInfo> ProbeAsync(string input, AppSettings settings, CancellationToken token) => ProbeFailure is null ? Task.FromResult(new MediaInfo(TimeSpan.FromSeconds(5), 0)) : Task.FromException<MediaInfo>(ProbeFailure);
+    public async Task<MediaInfo> ProbeAsync(string input, AppSettings settings, CancellationToken token)
+    {
+        ProbeStarted.TrySetResult();
+        if (BlockProbe) await Task.Delay(Timeout.Infinite, token);
+        if (ProbeFailure is not null) throw ProbeFailure;
+        return new(TimeSpan.FromSeconds(5), 0);
+    }
+    public async Task ValidateLocalAsync(AppSettings settings, CancellationToken token, IProgress<Cuelify.Infrastructure.Translation.Local.LocalPreparationProgress>? progress = null)
+    {
+        PreparationProgress = progress;
+        await Task.Run(() =>
+        {
+            progress?.Report(new(Cuelify.Infrastructure.Translation.Local.LocalPreparationStage.CheckingRuntime));
+            progress?.Report(new(Cuelify.Infrastructure.Translation.Local.LocalPreparationStage.LoadingModel));
+        }, token);
+        PreparationStarted.TrySetResult();
+        if (BlockPreparation) await ReleasePreparation.Task.WaitAsync(token);
+        if (PreparationFailure is not null) throw PreparationFailure;
+        progress?.Report(new(Cuelify.Infrastructure.Translation.Local.LocalPreparationStage.Ready));
+    }
     public async Task<TranscriptionResult> TranscribeAsync(string input, AppSettings settings, string key, IProgress<TranscriptionProgress> progress, CancellationToken token)
     {
         RecognitionSettings = settings;
@@ -633,7 +672,15 @@ internal sealed class FakeJobs : IDesktopJobService
         return new TranslationResult(cues.Select(cue => cue with { TranslatedText = Partial && cue.Id == "cue-2" ? null : "中文译文" }).ToArray(), Partial ? ["cue-2"] : [], 0, 0)
         { FailureReasons = FailureReason is null ? new Dictionary<string, string>() : new Dictionary<string, string> { ["cue-2"] = FailureReason } };
     }
-    public Task<string> TestEngineAsync(AppSettings settings, string key, CancellationToken token) => EngineFailure is null ? Task.FromResult("连接成功，翻译测试通过") : Task.FromException<string>(EngineFailure);
+    public async Task<string> TestEngineAsync(AppSettings settings, string key, CancellationToken token, IProgress<Cuelify.Infrastructure.Translation.Local.LocalPreparationProgress>? progress = null)
+    {
+        EngineSettings = settings;
+        _ = new PromptBuilder().Build(settings.GetProfile(), settings.TranslationSettings(), [Cues[0]], []);
+        if (settings.Provider == TranslationProvider.Local) await ValidateLocalAsync(settings, token, progress);
+        progress?.Report(new(Cuelify.Infrastructure.Translation.Local.LocalPreparationStage.TestingTranslation));
+        if (EngineFailure is not null) throw EngineFailure;
+        return "连接成功，翻译测试通过";
+    }
     public string Preview(IReadOnlyList<SubtitleCue> cues, AppSettings settings) { PreviewSettings = settings; return "fixture preview"; }
     public ValueTask DisposeAsync() { Disposed = true; return ValueTask.CompletedTask; }
 }

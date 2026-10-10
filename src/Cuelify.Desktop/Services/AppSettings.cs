@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Text.Json.Serialization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Cuelify.Core.Translation;
 using Cuelify.Infrastructure.Translation;
@@ -34,16 +33,17 @@ public partial class AppSettings : ObservableObject
     [ObservableProperty] private bool thinkingEnabled;
     [ObservableProperty] private string thinkingEffort = "low";
     [ObservableProperty] private int timeoutSeconds = 120;
-    [ObservableProperty] private int batchSize = 12;
-    [ObservableProperty] private int translationConcurrency = 1;
+    [ObservableProperty] private int translationConcurrency = 4;
     [ObservableProperty] private int contextCues = 5;
     [ObservableProperty] private int followingContextCues = 2;
     [ObservableProperty] private int maximumAttempts = 3;
-    [ObservableProperty] private int maximumBatchCharacters = 6000;
     [ObservableProperty] private int maximumContextCharacters = 3000;
     [ObservableProperty] private string modelPath = "";
-    [ObservableProperty] private string embeddedModelId = "";
+    [ObservableProperty] private string localModelId = "";
     [ObservableProperty] private string modelSha256 = "";
+    [ObservableProperty] private string llamaServerPath = "";
+    [ObservableProperty] private string llamaServerVersion = "";
+    [ObservableProperty] private int localConcurrency = 2;
     public Dictionary<string, EmbeddedModelFile> ModelFiles { get; set; } = new(StringComparer.Ordinal);
     [ObservableProperty] private int gpuLayers = 99;
     [ObservableProperty] private int contextSize = 4096;
@@ -61,38 +61,61 @@ public partial class AppSettings : ObservableObject
     [ObservableProperty] private long maximumUploadBytes = 2_900_000_000;
     [ObservableProperty] private string theme = "系统";
     [ObservableProperty] private bool reduceMotion = true;
-    [ObservableProperty] private PromptProfile compatibleProfile = PromptPresets.Cloud;
-    [ObservableProperty] private PromptProfile deepSeekProfile = PromptPresets.Cloud;
-    // 仅用于读取旧版的共用模板；保存时迁移到各模型的模板。
-    [ObservableProperty]
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    private PromptProfile? localProfile;
-    public Dictionary<string, PromptProfile> EmbeddedModelProfiles { get; set; } = new(StringComparer.Ordinal);
+    public const int CurrentSchemaVersion = 2;
+    public int SchemaVersion { get; init; } = CurrentSchemaVersion;
+    public Dictionary<string, PromptProfile> PromptLibrary { get; set; } = new(StringComparer.Ordinal);
+    public Dictionary<string, ModelPromptBinding> ModelPromptBindings { get; set; } = new(StringComparer.Ordinal);
+    [System.Text.Json.Serialization.JsonIgnore]
+    public IEnumerable<PromptProfile> AllPrompts => PromptPresets.All.Concat(PromptLibrary.Values);
 
-    public PromptProfile GetLocalProfile() => EmbeddedModelProfiles.GetValueOrDefault(LocalOptions().ModelId) ?? LocalProfile ?? LocalOptions().Model.DefaultProfile;
-    public void MigrateLocalProfiles()
+    public string ModelKey(TranslationProvider? provider = null)
     {
-        EmbeddedModelProfiles ??= new(StringComparer.Ordinal);
-        var model = LocalOptions().Model;
-        if (LocalProfile is { } previous && !EmbeddedModelProfiles.ContainsKey(model.Id))
-            EmbeddedModelProfiles[model.Id] = previous == PromptPresets.LegacyLocal || previous == PromptPresets.Local
-                ? model.DefaultProfile : previous;
-        LocalProfile = null;
+        var selected = provider ?? Provider;
+        return selected == TranslationProvider.Local ? "local:" + LocalOptions().ModelId :
+            "cloud:" + Infrastructure.Storage.AtomicFile.Hash(new { Provider = selected,
+                Endpoint = new CloudTranslationOptions { BaseUrl = BaseUrl }.Endpoint().AbsoluteUri, Model = CloudModel.Trim() });
     }
-    public PromptProfile GetProfile() => Provider switch { TranslationProvider.Local => GetLocalProfile(), TranslationProvider.DeepSeek => DeepSeekProfile, _ => CompatibleProfile };
-    public void SetProfile(PromptProfile profile)
+    public string ModelName(TranslationProvider? provider = null) => (provider ?? Provider) == TranslationProvider.Local
+        ? LocalOptions().Model.Name : $"{((provider ?? Provider) == TranslationProvider.DeepSeek ? "DeepSeek" : "OpenAI 兼容服务")} · {CloudModel.Trim()} · {BaseUrl.Trim()}";
+    public PromptProfile FindPrompt(string id) => PromptPresets.All.FirstOrDefault(profile => profile.Id == id)
+        ?? PromptLibrary.GetValueOrDefault(id) ?? throw new ArgumentException("关联的提示词不存在，请重新选择提示词。");
+    public PromptProfile GetProfile(TranslationProvider? provider = null)
     {
-        if (Provider == TranslationProvider.Local) EmbeddedModelProfiles[LocalOptions().ModelId] = profile;
-        else if (Provider == TranslationProvider.DeepSeek) DeepSeekProfile = profile;
-        else CompatibleProfile = profile;
+        var selected = provider ?? Provider;
+        var fallback = selected == TranslationProvider.Local ? FindPrompt(LocalOptions().Model.DefaultPromptId) : PromptPresets.BatchSubtitles;
+        return ModelPromptBindings.TryGetValue(ModelKey(selected), out var binding) ? FindPrompt(binding.PromptId) : fallback;
+    }
+    public void AssociatePrompt(string id)
+    {
+        _ = FindPrompt(id);
+        ModelPromptBindings[ModelKey()] = new(ModelName(), id);
+        OnPropertyChanged(nameof(ModelPromptBindings));
+    }
+    public void SavePrompt(PromptProfile profile)
+    {
+        PromptBuilder.Validate(profile);
+        if (PromptPresets.IsBuiltIn(profile.Id)) throw new ArgumentException("内置模板不可修改，请先创建副本。");
+        if (AllPrompts.Any(other => other.Id != profile.Id && other.Name.Equals(profile.Name, StringComparison.OrdinalIgnoreCase)))
+            throw new ArgumentException("模板名称已存在，请使用其他名称。");
+        PromptLibrary[profile.Id] = profile;
+        OnPropertyChanged(nameof(PromptLibrary));
+    }
+    public void DeletePrompt(string id)
+    {
+        if (!PromptLibrary.ContainsKey(id)) throw new ArgumentException("只能删除自定义模板。");
+        var references = ModelPromptBindings.Where(item => item.Value.PromptId == id).ToArray();
+        // 移除显式关联，各模型按自己的默认模板回退。
+        foreach (var item in references) ModelPromptBindings.Remove(item.Key);
+        PromptLibrary.Remove(id);
+        OnPropertyChanged(nameof(PromptLibrary)); OnPropertyChanged(nameof(ModelPromptBindings));
     }
     public TranslationSettings TranslationSettings() => new()
     {
         SourceLanguage = SourceLanguage, TargetLanguage = TargetLanguage, TargetStyle = TargetStyle,
-        BatchSize = Provider == TranslationProvider.Local ? 1 : BatchSize,
-        Concurrency = Provider == TranslationProvider.Local ? 1 : TranslationConcurrency,
+        BatchSize = GetProfile().BatchTranslation ? GetProfile().BatchSize : 1,
+        Concurrency = Provider == TranslationProvider.Local ? LocalConcurrency : TranslationConcurrency,
         ContextCues = ContextCues, FollowingContextCues = FollowingContextCues, MaximumAttempts = MaximumAttempts,
-        MaximumBatchCharacters = MaximumBatchCharacters, MaximumContextCharacters = MaximumContextCharacters
+        MaximumBatchCharacters = GetProfile().BatchTranslation ? GetProfile().MaximumBatchCharacters : 50000, MaximumContextCharacters = MaximumContextCharacters
     };
     public CloudTranslationOptions CloudOptions() => new()
     {
@@ -106,8 +129,8 @@ public partial class AppSettings : ObservableObject
     public DeepSeekThinkingOptions ThinkingOptions() => new(ThinkingEnabled, ThinkingEnabled ? ThinkingEffort : null);
     public EmbeddedModelOptions LocalOptions() => new()
     {
-        ModelId = string.IsNullOrWhiteSpace(EmbeddedModelId) ? EmbeddedModelCatalog.Default.Id : EmbeddedModelId,
-        ExpectedSha256 = ModelSha256,
+        ModelId = string.IsNullOrWhiteSpace(LocalModelId) ? EmbeddedModelCatalog.Default.Id : LocalModelId,
+        ServerPath = LlamaServerPath, Concurrency = LocalConcurrency,
         ModelPath = ModelPath, GpuLayers = GpuLayers, ContextSize = checked((uint)ContextSize),
         MaximumTokens = LocalMaximumTokens, InferenceTimeout = TimeSpan.FromSeconds(TimeoutSeconds)
     };
@@ -125,3 +148,5 @@ public partial class AppSettings : ObservableObject
         return number;
     }
 }
+
+public sealed record ModelPromptBinding(string ModelName, string PromptId);

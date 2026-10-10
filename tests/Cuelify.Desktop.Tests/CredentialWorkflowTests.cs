@@ -149,7 +149,7 @@ public sealed class CredentialWorkflowTests
     {
         using var fixture = new Fixture(); await using var model = fixture.Model();
         model.TranslationKey = "hidden-provider-secret"; model.ProviderIndex = 0;
-        model.SystemTemplate += "hidden-provider-secret"; await model.SaveSettingsCommand.ExecuteAsync(null);
+        model.CopyPromptCommand.Execute(null); model.SystemTemplate += "hidden-provider-secret"; await model.SaveSettingsCommand.ExecuteAsync(null);
         Assert.Contains("包含 API 密钥", model.Error); Assert.False(File.Exists(Path.Combine(fixture.Root, "settings.json")));
         fixture.Jobs.Failure = new ArgumentException("hidden-provider-secret"); model.InputPath = "fixture.mp4";
         await model.RunCommand.ExecuteAsync(null);

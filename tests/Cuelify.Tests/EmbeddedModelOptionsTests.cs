@@ -34,21 +34,22 @@ public sealed class EmbeddedModelOptionsTests
     }
 
     [Fact]
-    public async Task RejectsMissingModel()
+    public void RejectsMissingModelFile()
     {
         var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString(), EmbeddedModelCatalog.Default.DefaultFileName);
-        await Assert.ThrowsAsync<FileNotFoundException>(() => EmbeddedModelOptions.VerifyIdentityAsync(path, CancellationToken.None));
+        Assert.Throws<FileNotFoundException>(() => ModelFileVersion.Read(path));
     }
 
     [Fact]
-    public async Task RejectsOtherModelsAndCorruptedWeights()
+    public async Task FileVersionAcceptsAnyContentAndDoesNotReadLockedWeights()
     {
         using var directory = new TestDirectory();
         var other = directory.File("other.gguf");
         var officialName = directory.File(EmbeddedModelCatalog.Default.DefaultFileName);
         await File.WriteAllTextAsync(other, "损坏的模型文件");
         await File.WriteAllTextAsync(officialName, "损坏的模型文件");
-        await Assert.ThrowsAsync<InvalidDataException>(() => EmbeddedModelOptions.VerifyIdentityAsync(other, CancellationToken.None));
-        await Assert.ThrowsAsync<InvalidDataException>(() => EmbeddedModelOptions.VerifyIdentityAsync(officialName, CancellationToken.None));
+        using var locked = new FileStream(other, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+        Assert.Equal(locked.Length, ModelFileVersion.Read(other).Length);
+        Assert.Equal(ModelFileVersion.Read(other).Length, ModelFileVersion.Read(officialName).Length);
     }
 }

@@ -31,7 +31,7 @@ public sealed class TranslationOrchestratorTests
             }
             return Task.FromResult(Response(request));
         } };
-        var result = await Orchestrator(directory, engine).TranslateAsync(Cues, PromptPresets.Cloud,
+        var result = await Orchestrator(directory, engine).TranslateAsync(Cues, PromptPresets.BatchSubtitles with { BatchSize = 1 },
             Settings with { BatchSize = 1, Concurrency = 1 }, progress: new ProgressSink(value => { if (value.Cues is not null) completed = value; }));
         Assert.True(result.IsComplete); Assert.Equal(2, engine.Calls);
         Assert.Equal(result.Cues, completed!.Cues);
@@ -61,7 +61,7 @@ public sealed class TranslationOrchestratorTests
         { Content = new StringContent("echo fake-secret-key") }));
         using var http = new HttpClient(handler);
         var engine = new OpenAiCompatibleTranslationEngine(http, () => "fake-secret-key", new() { BaseUrl = "https://provider.example/v1", Model = "test" });
-        var result = await new TranslationOrchestrator(engine, directory.File("cache")).TranslateAsync(Cues, PromptPresets.Cloud, Settings);
+        var result = await new TranslationOrchestrator(engine, directory.File("cache")).TranslateAsync(Cues, PromptPresets.BatchSubtitles, Settings);
         Assert.False(result.IsComplete);
         Assert.All(result.FailedIds, id => Assert.Equal("HTTP 401", result.FailureReasons[id]));
         Assert.DoesNotContain("fake-secret-key", JsonSerializer.Serialize(result));
@@ -77,7 +77,7 @@ public sealed class TranslationOrchestratorTests
         using var handler = new CloudTranslationTests.Handler((_, _) => { calls++; return Task.FromResult(CloudTranslationTests.Success()); });
         using var http = new HttpClient(handler);
         var engine = new OpenAiCompatibleTranslationEngine(http, () => null, new() { BaseUrl = "https://provider.example/v1", Model = "test" });
-        var result = await new TranslationOrchestrator(engine, directory.File("cache")).TranslateAsync(Cues, PromptPresets.Cloud, Settings);
+        var result = await new TranslationOrchestrator(engine, directory.File("cache")).TranslateAsync(Cues, PromptPresets.BatchSubtitles, Settings);
         Assert.Equal(0, calls);
         Assert.All(result.FailedIds, id => Assert.Contains("请填写有效的翻译服务 API 密钥", result.FailureReasons[id]));
     }
@@ -101,12 +101,12 @@ public sealed class TranslationOrchestratorTests
             return Task.FromResult(Response(request));
         } };
         var orchestrator = Orchestrator(directory, engine);
-        var result = await orchestrator.TranslateAsync(Cues, PromptPresets.Cloud, Settings);
+        var result = await orchestrator.TranslateAsync(Cues, PromptPresets.BatchSubtitles, Settings);
         Assert.True(result.IsComplete);
         Assert.Equal(2, result.EngineCalls);
         Assert.Equal(Cues.Select(cue => (cue.Id, cue.Start, cue.End)), result.Cues.Select(cue => (cue.Id, cue.Start, cue.End)));
         Assert.Equal("你好。", result.Cues[0].TranslatedText);
-        var again = await orchestrator.TranslateAsync(Cues, PromptPresets.Cloud, Settings);
+        var again = await orchestrator.TranslateAsync(Cues, PromptPresets.BatchSubtitles, Settings);
         Assert.Equal(0, again.EngineCalls);
         Assert.Equal(2, again.CacheHits);
     }
@@ -117,13 +117,13 @@ public sealed class TranslationOrchestratorTests
         using var directory = new TestDirectory();
         var engine = new Engine { Behavior = (_, call, _) => Task.FromResult(new TranslationResponse(call == 1 ? "{\"a\":\"你好\"}" : "{\"b\":\"Goodbye.\"}")) };
         var orchestrator = Orchestrator(directory, engine);
-        var partial = await orchestrator.TranslateAsync(Cues, PromptPresets.Cloud, Settings);
+        var partial = await orchestrator.TranslateAsync(Cues, PromptPresets.BatchSubtitles, Settings);
         Assert.False(partial.IsComplete);
         Assert.Equal(["b"], partial.FailedIds);
         Assert.Null(partial.Cues[1].TranslatedText);
         Assert.Throws<InvalidDataException>(() => SrtSerializer.SerializeTranslated(partial.Cues));
         engine.Behavior = (request, _, _) => { Assert.Equal("b", Assert.Single(request.Cues).Id); return Task.FromResult(Response(request)); };
-        var resumed = await orchestrator.TranslateAsync(Cues, PromptPresets.Cloud, Settings);
+        var resumed = await orchestrator.TranslateAsync(Cues, PromptPresets.BatchSubtitles, Settings);
         Assert.True(resumed.IsComplete);
         Assert.Equal(1, resumed.EngineCalls);
         Assert.Equal(1, resumed.CacheHits);
@@ -135,8 +135,8 @@ public sealed class TranslationOrchestratorTests
         using var directory = new TestDirectory();
         var engine = new Engine();
         var orchestrator = Orchestrator(directory, engine);
-        var first = await orchestrator.TranslateAsync(Cues, PromptPresets.Cloud, Settings);
-        var displayed = await orchestrator.TranslateAsync(first.Cues, PromptPresets.Cloud, Settings);
+        var first = await orchestrator.TranslateAsync(Cues, PromptPresets.BatchSubtitles, Settings);
+        var displayed = await orchestrator.TranslateAsync(first.Cues, PromptPresets.BatchSubtitles, Settings);
         Assert.Equal(0, displayed.EngineCalls);
         Assert.Equal(2, displayed.CacheHits);
         Assert.Equal(first.Cues, displayed.Cues);
@@ -148,9 +148,9 @@ public sealed class TranslationOrchestratorTests
         using var directory = new TestDirectory();
         var engine = new Engine();
         var orchestrator = Orchestrator(directory, engine);
-        await orchestrator.TranslateAsync(Cues, PromptPresets.Cloud, Settings);
+        await orchestrator.TranslateAsync(Cues, PromptPresets.BatchSubtitles, Settings);
         engine.Behavior = (request, _, _) => { Assert.Equal("b", Assert.Single(request.Cues).Id); return Task.FromResult(new TranslationResponse("{\"b\":\"新的译文\"}")); };
-        var result = await orchestrator.TranslateAsync(Cues, PromptPresets.Cloud, Settings, new HashSet<string> { "b" });
+        var result = await orchestrator.TranslateAsync(Cues, PromptPresets.BatchSubtitles, Settings, new HashSet<string> { "b" });
         Assert.Equal(1, result.EngineCalls);
         Assert.Equal("新的译文", result.Cues[1].TranslatedText);
         Assert.Equal("模拟译文a", result.Cues[0].TranslatedText);
@@ -162,13 +162,13 @@ public sealed class TranslationOrchestratorTests
         using var directory = new TestDirectory();
         var engine = new Engine();
         var orchestrator = Orchestrator(directory, engine);
-        await orchestrator.TranslateAsync(Cues, PromptPresets.Cloud, Settings);
+        await orchestrator.TranslateAsync(Cues, PromptPresets.BatchSubtitles, Settings);
         engine.Behavior = (_, _, _) => Task.FromException<TranslationResponse>(new TranslationServiceException(HttpStatusCode.Unauthorized, null));
-        var failed = await orchestrator.TranslateAsync(Cues, PromptPresets.Cloud, Settings, new HashSet<string> { "b" });
+        var failed = await orchestrator.TranslateAsync(Cues, PromptPresets.BatchSubtitles, Settings, new HashSet<string> { "b" });
         Assert.False(failed.IsComplete);
         Assert.Null(failed.Cues[1].TranslatedText);
         engine.Behavior = (request, _, _) => { Assert.Equal("b", Assert.Single(request.Cues).Id); return Task.FromResult(new TranslationResponse("{\"b\":\"恢复的新译文\"}")); };
-        var recovered = await orchestrator.TranslateAsync(Cues, PromptPresets.Cloud, Settings);
+        var recovered = await orchestrator.TranslateAsync(Cues, PromptPresets.BatchSubtitles, Settings);
         Assert.Equal(1, recovered.EngineCalls);
         Assert.Equal("恢复的新译文", recovered.Cues[1].TranslatedText);
     }
@@ -179,9 +179,9 @@ public sealed class TranslationOrchestratorTests
         using var directory = new TestDirectory();
         var engine = new Engine();
         var orchestrator = Orchestrator(directory, engine);
-        await orchestrator.TranslateAsync(Cues, PromptPresets.Cloud, Settings with { BatchSize = 1 });
+        await orchestrator.TranslateAsync(Cues, PromptPresets.BatchSubtitles with { BatchSize = 1 }, Settings with { BatchSize = 1 });
         engine.Behavior = (request, _, _) => { Assert.Equal("a", Assert.Single(request.Cues).Id); return Task.FromResult(new TranslationResponse("{\"a\":\"新的上文译文\"}")); };
-        var changed = await orchestrator.TranslateAsync(Cues, PromptPresets.Cloud, Settings with { BatchSize = 1 }, new HashSet<string> { "a" });
+        var changed = await orchestrator.TranslateAsync(Cues, PromptPresets.BatchSubtitles with { BatchSize = 1 }, Settings with { BatchSize = 1 }, new HashSet<string> { "a" });
         Assert.True(changed.IsComplete);
         Assert.Equal(1, changed.EngineCalls);
         Assert.Equal("模拟译文b", changed.Cues[1].TranslatedText);
@@ -195,11 +195,11 @@ public sealed class TranslationOrchestratorTests
         var inputs = Cues.Concat([TranslationPromptTests.Cue("c", "Third.", 4), TranslationPromptTests.Cue("d", "Fourth.", 6)]).ToArray();
         var seen = new System.Collections.Concurrent.ConcurrentDictionary<string, string>();
         engine.Behavior = async (request, _, _) => { var cue = Assert.Single(request.Cues); seen[cue.Id] = request.Messages[^1].Content; await Task.Delay(cue.Id == "a" ? 20 : 1); return Response(request); };
-        var result = await Orchestrator(directory, engine).TranslateAsync(inputs, PromptPresets.Cloud, Settings with { BatchSize = 1, Concurrency = 2 });
+        var result = await Orchestrator(directory, engine).TranslateAsync(inputs, PromptPresets.BatchSubtitles with { BatchSize = 1 }, Settings with { BatchSize = 1, Concurrency = 2 });
         Assert.True(result.IsComplete);
         Assert.Contains("（无）", seen["a"]);
         Assert.Contains("Translation", seen["c"]);
-        var repeat = await Orchestrator(directory, engine).TranslateAsync(inputs, PromptPresets.Cloud, Settings with { BatchSize = 1, Concurrency = 2 });
+        var repeat = await Orchestrator(directory, engine).TranslateAsync(inputs, PromptPresets.BatchSubtitles with { BatchSize = 1 }, Settings with { BatchSize = 1, Concurrency = 2 });
         Assert.Equal(0, repeat.EngineCalls);
     }
 
@@ -208,7 +208,7 @@ public sealed class TranslationOrchestratorTests
     {
         using var directory = new TestDirectory();
         var engine = new Engine { Behavior = (request, call, _) => Task.FromResult(call == 1 ? new TranslationResponse("说明 {bad}") : Response(request)) };
-        var result = await Orchestrator(directory, engine).TranslateAsync(Cues, PromptPresets.Cloud, Settings);
+        var result = await Orchestrator(directory, engine).TranslateAsync(Cues, PromptPresets.BatchSubtitles, Settings);
         Assert.True(result.IsComplete);
         Assert.Equal(3, result.EngineCalls);
     }
@@ -218,7 +218,7 @@ public sealed class TranslationOrchestratorTests
     {
         using var directory = new TestDirectory();
         var engine = new Engine { Behavior = (_, _, _) => Task.FromResult(new TranslationResponse("{\"a\":\"Hello.\"}")) };
-        var result = await Orchestrator(directory, engine).TranslateAsync([Cues[0]], PromptPresets.Cloud, Settings);
+        var result = await Orchestrator(directory, engine).TranslateAsync([Cues[0]], PromptPresets.BatchSubtitles, Settings);
         Assert.False(result.IsComplete);
         Assert.Equal(3, result.EngineCalls);
         Assert.Null(result.Cues[0].TranslatedText);
@@ -230,7 +230,7 @@ public sealed class TranslationOrchestratorTests
     {
         using var directory = new TestDirectory();
         var engine = new Engine { Behavior = (_, _, _) => Task.FromException<TranslationResponse>(new TranslationServiceException((HttpStatusCode)status, null)) };
-        var result = await Orchestrator(directory, engine).TranslateAsync(Cues, PromptPresets.Cloud, Settings);
+        var result = await Orchestrator(directory, engine).TranslateAsync(Cues, PromptPresets.BatchSubtitles, Settings);
         Assert.False(result.IsComplete);
         Assert.Equal(expectedCalls, result.EngineCalls);
     }
@@ -240,7 +240,7 @@ public sealed class TranslationOrchestratorTests
     {
         using var directory = new TestDirectory();
         var engine = new Engine { Behavior = (_, _, _) => Task.FromException<TranslationResponse>(new TranslationServiceException(HttpStatusCode.TooManyRequests, TimeSpan.FromSeconds(10))) };
-        var result = await Orchestrator(directory, engine).TranslateAsync(Cues, PromptPresets.Cloud, Settings);
+        var result = await Orchestrator(directory, engine).TranslateAsync(Cues, PromptPresets.BatchSubtitles, Settings);
         Assert.Equal(1, result.EngineCalls);
     }
 
@@ -251,9 +251,9 @@ public sealed class TranslationOrchestratorTests
         using var cancellation = new CancellationTokenSource();
         var engine = new Engine { Behavior = (request, _, _) => { cancellation.Cancel(); return Task.FromResult(Response(request)); } };
         var orchestrator = Orchestrator(directory, engine);
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => orchestrator.TranslateAsync(Cues, PromptPresets.Cloud, Settings, cancellationToken: cancellation.Token));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => orchestrator.TranslateAsync(Cues, PromptPresets.BatchSubtitles, Settings, cancellationToken: cancellation.Token));
         engine.Behavior = null;
-        var recovered = await orchestrator.TranslateAsync(Cues, PromptPresets.Cloud, Settings);
+        var recovered = await orchestrator.TranslateAsync(Cues, PromptPresets.BatchSubtitles, Settings);
         Assert.Equal(0, recovered.EngineCalls);
         Assert.Equal(2, recovered.CacheHits);
     }
@@ -264,10 +264,10 @@ public sealed class TranslationOrchestratorTests
         using var directory = new TestDirectory();
         var engine = new Engine();
         var orchestrator = Orchestrator(directory, engine);
-        await orchestrator.TranslateAsync(Cues, PromptPresets.Cloud, Settings);
+        await orchestrator.TranslateAsync(Cues, PromptPresets.BatchSubtitles, Settings);
         var cache = Directory.GetFiles(directory.File("translation-cache"), "batch-*.json", SearchOption.AllDirectories).Single();
         await File.WriteAllTextAsync(cache, "{broken");
-        await Assert.ThrowsAsync<InvalidDataException>(() => orchestrator.TranslateAsync(Cues, PromptPresets.Cloud, Settings));
+        await Assert.ThrowsAsync<InvalidDataException>(() => orchestrator.TranslateAsync(Cues, PromptPresets.BatchSubtitles, Settings));
         Assert.Equal(1, engine.Calls);
     }
 
@@ -280,8 +280,8 @@ public sealed class TranslationOrchestratorTests
         var transcription = new TranscriptionPipeline(NativeMediaTests.Processor(), new TranscriptionPipelineTests.FakeVad(), asr,
             "fake-vad", new ElevenLabsAsrOptions(), directory.File("asr-cache"));
         var recognized = await transcription.RunAsync(input, directory.File("source.srt"));
-        await Orchestrator(directory, new()).TranslateAsync(recognized.Cues, PromptPresets.Cloud, Settings);
-        await Orchestrator(directory, new("fake-B")).TranslateAsync(recognized.Cues, PromptPresets.Concise, Settings with { TargetLanguage = "日语" });
+        await Orchestrator(directory, new()).TranslateAsync(recognized.Cues, PromptPresets.BatchSubtitles, Settings);
+        await Orchestrator(directory, new("fake-B")).TranslateAsync(recognized.Cues, PromptPresets.BatchSubtitles with { SystemTemplate = PromptPresets.BatchSubtitles.SystemTemplate + "简洁表达" }, Settings with { TargetLanguage = "日语" });
         var repeated = await transcription.RunAsync(input, directory.File("source-again.srt"));
         Assert.Equal(1, asr.Calls);
         Assert.Equal(0, repeated.AsrRequests);

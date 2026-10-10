@@ -11,12 +11,7 @@ public sealed class ProcessCommandRunner : ICommandRunner
         cancellationToken.ThrowIfCancellationRequested();
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(command.Timeout);
-        var start = new ProcessStartInfo(command.FileName)
-        {
-            UseShellExecute = false, CreateNoWindow = true,
-            RedirectStandardOutput = true, RedirectStandardError = true
-        };
-        foreach (var argument in command.Arguments) start.ArgumentList.Add(argument);
+        var start = CreateStartInfo(command);
         using var process = new Process { StartInfo = start };
         if (!process.Start()) throw new IOException("无法启动外部命令。");
         var stderr = process.StandardError.ReadToEndAsync(timeout.Token);
@@ -51,5 +46,16 @@ public sealed class ProcessCommandRunner : ICommandRunner
             try { await Task.WhenAll(pump, stderr, exit).WaitAsync(TimeSpan.FromSeconds(5)); }
             catch (Exception) { }
         }
+    }
+
+    public static ProcessStartInfo CreateStartInfo(CommandRequest command)
+    {
+        var start = new ProcessStartInfo(command.FileName)
+        {
+            UseShellExecute = false, CreateNoWindow = true,
+            RedirectStandardOutput = true, RedirectStandardError = true
+        };
+        foreach (var argument in command.Arguments) start.ArgumentList.Add(argument);
+        return start;
     }
 }

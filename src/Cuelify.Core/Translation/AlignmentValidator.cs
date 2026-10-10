@@ -10,7 +10,7 @@ public static class AlignmentValidator
         var accepted = new Dictionary<string, string>(StringComparer.Ordinal);
         if (format == TranslationOutputFormat.PlainText)
         {
-            if (cues.Count != 1) throw new ArgumentException("本地纯文本输出仅支持单条字幕。");
+            if (cues.Count != 1) throw new ArgumentException("纯文本输出仅支持单条字幕。");
             if (IsValid(output, cues[0], sourceEqualsTarget) && !output.TrimStart().StartsWith("```", StringComparison.Ordinal))
                 accepted[cues[0].Id] = output.Trim();
         }

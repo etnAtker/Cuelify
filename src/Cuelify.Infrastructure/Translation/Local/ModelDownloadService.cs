@@ -1,5 +1,3 @@
-using System.Net;
-using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Cuelify.Infrastructure.Storage;
@@ -14,7 +12,6 @@ public sealed record ModelDownloadArtifact(string Repository, string Revision, s
 public interface IModelDownloadService
 {
     Task<EmbeddedModelFile> DownloadAsync(EmbeddedModel model, string root, IProgress<ModelDownloadProgress> progress, CancellationToken token);
-    Task<EmbeddedModelFile> VerifyAsync(EmbeddedModel model, string path, IProgress<ModelDownloadProgress> progress, CancellationToken token);
 }
 
 public sealed class ModelDownloadService(HttpClient http) : IModelDownloadService
@@ -48,14 +45,6 @@ public sealed class ModelDownloadService(HttpClient http) : IModelDownloadServic
         return new(model.Repository, revision, fileName, size, hash);
     }
 
-    public async Task<EmbeddedModelFile> VerifyAsync(EmbeddedModel model, string path, IProgress<ModelDownloadProgress> progress, CancellationToken token)
-    {
-        progress.Report(new("查询官方模型信息"));
-        var artifact = await ResolveAsync(model, token);
-        progress.Report(new("校验模型"));
-        return new(Path.GetFullPath(path), await VerifyFileAsync(path, artifact, token));
-    }
-
     public async Task<EmbeddedModelFile> DownloadAsync(EmbeddedModel model, string root, IProgress<ModelDownloadProgress> progress, CancellationToken token)
     {
         root = Path.GetFullPath(root);
@@ -72,51 +61,7 @@ public sealed class ModelDownloadService(HttpClient http) : IModelDownloadServic
         }
         var partial = target + ".partial";
         var metadata = partial + ".json";
-        var previous = await AtomicFile.ReadJsonAsync<ModelDownloadArtifact>(metadata, token);
-        var offset = previous == artifact && File.Exists(partial) ? new FileInfo(partial).Length : 0;
-        if (artifact.Size is { } expected && offset > expected) offset = 0;
-        if (offset == 0)
-        {
-            await using (var reset = new FileStream(partial, FileMode.Create, FileAccess.Write, FileShare.None)) { }
-            await AtomicFile.WriteJsonAsync(metadata, artifact, token);
-        }
-        if (artifact.Size is not { } total || offset != total)
-        {
-            using var request = new HttpRequestMessage(HttpMethod.Get, artifact.Url);
-            if (offset > 0) request.Headers.Range = new RangeHeaderValue(offset, null);
-            using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
-            response.EnsureSuccessStatusCode();
-            if (response.StatusCode == HttpStatusCode.PartialContent)
-            {
-                var range = response.Content.Headers.ContentRange;
-                if (range?.From != offset || range.To is null || (artifact.Size is { } remoteSize && range.Length != remoteSize))
-                    throw new InvalidDataException("服务器返回的续传位置不正确，请重试下载。");
-            }
-            else offset = 0; // 未支持 Range 时从头写入，不能将完整响应追加到旧片段。
-            var totalBytes = artifact.Size ?? response.Content.Headers.ContentRange?.Length
-                ?? (response.Content.Headers.ContentLength is { } contentLength ? offset + contentLength : null);
-            await using var input = await response.Content.ReadAsStreamAsync(token);
-            await using (var output = new FileStream(partial, offset > 0 ? FileMode.Append : FileMode.Create, FileAccess.Write, FileShare.None, 131072, true))
-            {
-                var buffer = new byte[131072];
-                var received = offset;
-                progress.Report(new("下载中", received, totalBytes));
-                var lastReport = Environment.TickCount64;
-                while (true)
-                {
-                    var count = await input.ReadAsync(buffer, token);
-                    if (count == 0) break;
-                    await output.WriteAsync(buffer.AsMemory(0, count), token);
-                    received += count;
-                    if (totalBytes is { } maximum && received > maximum) throw new InvalidDataException("下载内容超过官方模型大小，请重试。");
-                    if (Environment.TickCount64 - lastReport >= 200)
-                    { progress.Report(new("下载中", received, totalBytes)); lastReport = Environment.TickCount64; }
-                }
-                await output.FlushAsync(token);
-                output.Flush(true);
-                if (totalBytes is { } finalSize && received != finalSize) throw new IOException("下载尚未完成，请继续下载。");
-            }
-        }
+        await ResumableDownload.DownloadAsync(http, partial, artifact, artifact.Url, artifact.Size, progress, token);
         progress.Report(new("校验模型"));
         string sha256;
         try { sha256 = await VerifyFileAsync(partial, artifact, token); }
@@ -136,6 +81,15 @@ public sealed class ModelDownloadService(HttpClient http) : IModelDownloadServic
         var info = new FileInfo(path);
         if (!info.Exists) throw new FileNotFoundException("找不到模型文件。", path);
         if (artifact.Size is { } size && info.Length != size) throw new InvalidDataException("模型大小与官方文件不符，请重新下载。");
-        return await EmbeddedModelOptions.VerifyIdentityAsync(path, token, artifact.Sha256 ?? "");
+        await using (var file = File.OpenRead(path))
+        {
+            var magic = new byte[4];
+            if (await file.ReadAsync(magic, token) != 4 || !magic.AsSpan().SequenceEqual("GGUF"u8))
+                throw new InvalidDataException("下载的模型文件无效，请重新下载。");
+        }
+        var hash = await AtomicFile.HashFileAsync(path, token);
+        if (!string.IsNullOrWhiteSpace(artifact.Sha256) && hash != artifact.Sha256)
+            throw new InvalidDataException("下载的模型文件不完整，请重新下载。");
+        return hash;
     }
 }

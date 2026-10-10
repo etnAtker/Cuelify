@@ -63,6 +63,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     [ObservableProperty] private string elevenLabsKey = "";
     [ObservableProperty] private bool isBusy;
     [ObservableProperty] private bool isInitializing;
+    [ObservableProperty] private bool isSavingSettings;
     [ObservableProperty] private string status = "待开始";
     [ObservableProperty] private string error = "";
     [ObservableProperty] private string engineStatus = "尚未测试连接";
@@ -73,13 +74,12 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     [ObservableProperty] private string userTemplate = "";
     [ObservableProperty] private string promptVariableStatus = "";
     [ObservableProperty] private CueRow? selectedCue;
-    [ObservableProperty] private string? presetSelection;
     public ObservableCollection<CueRow> Rows { get; } = [];
     public ObservableCollection<string> Log { get; } = [];
     public SelectionModel<string> LogSelection { get; } = new() { SingleSelect = false };
     public bool CanCopyLogs => LogSelection.Count > 0;
     public bool HasLogs => Log.Count > 0;
-    public string[] ProviderNames { get; } = ["OpenAI 兼容服务", "DeepSeek", "内嵌模型推理"];
+    public string[] ProviderNames { get; } = ["OpenAI 兼容服务", "DeepSeek", "本地模型推理"];
     public string[] SourceLanguageNames => SpeechLanguages.Names;
     public string DefaultSourceLanguage
     {
@@ -98,11 +98,9 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     public string RunButtonText => CanContinue ? "继续处理" : "开始处理";
     public string TestEngineButtonText => IsLocal ? "测试本地翻译" : "测试连接";
     public string EngineTestHint => IsLocal ? "使用所选模型试译一句短句。" : "测试会发送一句短句，可能产生费用。";
-    public string SystemPromptHint => IsLocal ? "默认翻译要求已包含在用户模板中，可按需补充。" : "设置翻译要求、语气和输出格式。";
     public string TopPHint => IsDeepSeek ? "仅在思考模式下使用，范围为 0.95～1。" : "留空使用服务默认值。";
     public bool CanEditTopP => !IsDeepSeek || Settings.ThinkingEnabled;
-    public string[] PresetNames { get; } = ["通用字幕批量翻译", "通用简洁字幕", "内嵌模型简单翻译", "内嵌模型字幕翻译"];
-    public int ProviderIndex { get => (int)Settings.Provider; set { if (value < 0 || value == (int)Settings.Provider) return; CaptureProfile(); Settings.Provider = (TranslationProvider)value; } }
+    public int ProviderIndex { get => (int)Settings.Provider; set { if (value < 0 || value == (int)Settings.Provider) return; Settings.Provider = (TranslationProvider)value; } }
     public bool IsLocal => Settings.Provider == TranslationProvider.Local;
     public bool IsCloud => !IsLocal;
     public bool IsDeepSeek => Settings.Provider == TranslationProvider.DeepSeek;
@@ -110,11 +108,10 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     public bool CanEditSampling => !IsDeepSeek || !Settings.ThinkingEnabled;
     public bool CanRun => CanConfigure && !string.IsNullOrWhiteSpace(InputPath) && string.IsNullOrEmpty(RunCredentialHint);
     public bool CanExport => !IsBusy && _isComplete && Rows.Count > 0 && Rows.All(row => row.Cue.TranslatedText is not null);
-    public string[] AvailablePresets => IsLocal ? [PromptPresets.LocalSimple.Name, PromptPresets.Local.Name] : [PromptPresets.Cloud.Name, PromptPresets.Concise.Name];
     public bool CanRetryCue => CanConfigure && SelectedCue is not null && _jobSettings is not null && string.IsNullOrEmpty(TranslationCredentialHint(_jobSettings.Provider, _jobSettings.BaseUrl));
     public bool CanPreview => !IsBusy && Rows.Count > 0;
     public bool HasRows => Rows.Count > 0;
-    public bool CanConfigure => !IsBusy && !IsInitializing && !IsCredentialBusy && !_disposed;
+    public bool CanConfigure => !IsBusy && !IsInitializing && !IsSavingSettings && !IsCredentialBusy && !_disposed;
     public string ResultSummary => Rows.Count == 0 ? "字幕预览" : $"共 {Rows.Count} 条字幕 · 已翻译 {Rows.Count(row => row.Cue.TranslatedText is not null)} 条";
     public IReadOnlyList<PromptVariableItem> PromptVariables => PromptVariableItem.All;
     public bool IsWorkspace => Page == AppPage.Workspace;
@@ -130,21 +127,24 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     public bool CanResume => CanContinue && IsResultsStep && CanRun;
     public bool CanStartNew => CanConfigure && IsResultsStep && _jobSettings is not null;
     public string FileName => string.IsNullOrWhiteSpace(InputPath) ? "尚未选择文件" : Path.GetFileName(InputPath);
-    public string TaskPromptSummary => (TaskProviderIndex == (int)TranslationProvider.Local ? _savedSettings.GetLocalProfile() :
-        TaskProviderIndex == (int)TranslationProvider.DeepSeek ? _savedSettings.DeepSeekProfile : _savedSettings.CompatibleProfile).Name;
-    public string TaskServiceSummary => TaskProviderIndex == (int)TranslationProvider.Local ? $"内嵌模型推理 · {EmbeddedModelCatalog.Get(_savedSettings.LocalOptions().ModelId).Name}" : $"{ProviderNames[Math.Clamp(TaskProviderIndex, 0, 2)]} · {_savedSettings.CloudModel}";
-    public string SettingsHint => IsBusy ? "任务正在进行，相关设置暂时无法修改。" : HasUnsavedSettings ? "有未保存的修改。保存后用于新的处理。" : "已保存的设置用于新的处理。";
+    public string TaskPromptSummary
+    {
+        get { var profile = _savedSettings.GetProfile((TranslationProvider)TaskProviderIndex); return $"{profile.Name} · {(profile.BatchTranslation ? "批量翻译" : "单条翻译")}"; }
+    }
+    public string TaskServiceSummary => TaskProviderIndex == (int)TranslationProvider.Local ? $"本地模型推理 · {EmbeddedModelCatalog.Get(_savedSettings.LocalOptions().ModelId).Name}" : $"{ProviderNames[Math.Clamp(TaskProviderIndex, 0, 2)]} · {_savedSettings.CloudModel}";
+    public string SettingsHint => IsBusy ? "任务正在进行，相关设置暂时无法修改。" : HasUnsavedSettings || HasPromptEdits ? "有未保存的修改。保存后用于新的处理。" : "已保存的设置用于新的处理。";
 
-    public MainWindowViewModel(IDesktopJobService jobs, ConfigurationStore store, IWindowDialogs dialogs, CredentialStore? credentials = null, IModelDownloadService? downloads = null)
+    public MainWindowViewModel(IDesktopJobService jobs, ConfigurationStore store, IWindowDialogs dialogs, CredentialStore? credentials = null, IModelDownloadService? downloads = null, ILlamaPackageService? packages = null)
     {
         _jobs = jobs; _store = store; _dialogs = dialogs; _credentials = credentials ?? new CredentialStore(store.Root);
         Settings = store.CreateDefaults(); InitializeModelDownloads(downloads);
+        InitializeLlamaPackages(packages);
         LoadCredentials();
         Settings.PropertyChanged += SettingsChanged;
         LogSelection.Source = Log;
         LogSelection.SelectionChanged += (_, _) => { OnPropertyChanged(nameof(CanCopyLogs)); CopyLogsCommand.NotifyCanExecuteChanged(); };
         Log.CollectionChanged += (_, _) => { OnPropertyChanged(nameof(HasLogs)); SelectAllLogsCommand.NotifyCanExecuteChanged(); };
-        LoadProfile();
+        InitializePromptLibrary();
         _savedSettings = ConfigurationStore.Snapshot(Settings);
         HasUnsavedSettings = false;
     }
@@ -160,12 +160,16 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     }
     private void SettingsChanged(object? sender, PropertyChangedEventArgs args)
     {
+        RefreshInferenceSettings(args.PropertyName);
         ModelSettingsChanged(args);
+        LlamaSettingsChanged(args.PropertyName);
         if (args.PropertyName == nameof(AppSettings.SourceLanguage) || _loadingSettings) OnPropertyChanged(nameof(DefaultSourceLanguage));
-        if (args.PropertyName == nameof(AppSettings.Provider) || args.PropertyName == nameof(AppSettings.EmbeddedModelId) && IsLocal)
+        if (args.PropertyName == nameof(AppSettings.Provider))
         {
-            LoadProfile(); OnPropertyChanged(nameof(AvailablePresets)); OnPropertyChanged(nameof(ProviderIndex)); OnPropertyChanged(nameof(IsLocal)); OnPropertyChanged(nameof(IsCloud)); OnPropertyChanged(nameof(IsDeepSeek)); OnPropertyChanged(nameof(IsCompatible));
+            OnPropertyChanged(nameof(ProviderIndex)); OnPropertyChanged(nameof(ProviderIndex)); OnPropertyChanged(nameof(IsLocal)); OnPropertyChanged(nameof(IsCloud)); OnPropertyChanged(nameof(IsDeepSeek)); OnPropertyChanged(nameof(IsCompatible));
         }
+        if (args.PropertyName is nameof(AppSettings.Provider) or nameof(AppSettings.LocalModelId) or nameof(AppSettings.BaseUrl) or nameof(AppSettings.CloudModel) or nameof(AppSettings.ModelPromptBindings) or nameof(AppSettings.PromptLibrary))
+            RefreshPromptAssociations();
         if (args.PropertyName is not (nameof(AppSettings.Theme) or nameof(AppSettings.ReduceMotion)))
         { ResetEngineStatus(); }
         if (!_loadingSettings) HasUnsavedSettings = true;
@@ -176,22 +180,18 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     private void ResetEngineStatus()
     {
         EngineStatus = IsLocal ? "尚未测试本地翻译" : "尚未测试连接";
-        OnPropertyChanged(nameof(TestEngineButtonText)); OnPropertyChanged(nameof(EngineTestHint)); OnPropertyChanged(nameof(SystemPromptHint)); OnPropertyChanged(nameof(TopPHint));
+        OnPropertyChanged(nameof(TestEngineButtonText)); OnPropertyChanged(nameof(EngineTestHint)); OnPropertyChanged(nameof(TopPHint));
     }
-    private void LoadProfile()
-    { var profile = Settings.GetProfile(); ProfileName = profile.Name; SystemTemplate = profile.SystemTemplate; UserTemplate = profile.UserTemplate; PresetSelection = null; }
-    private void CaptureProfile() => Settings.SetProfile(new(ProfileName, SystemTemplate, UserTemplate, IsLocal ? TranslationOutputFormat.PlainText : TranslationOutputFormat.CueIdJson));
     partial void OnInputPathChanged(string value)
     { Rows.Clear(); SelectedCue = null; _isComplete = false; _jobSettings = null; CanContinue = false; Step = WorkflowStep.File; Error = ""; Status = "待开始"; MediaSummary = ""; OnPropertyChanged(nameof(FileName)); OnPropertyChanged(nameof(ResultSummary)); OnPropertyChanged(nameof(HasRows)); RefreshCommands(); }
     partial void OnSelectedCueChanged(CueRow? value) => RefreshCommands();
-    partial void OnPresetSelectionChanged(string? value) { if (value is not null && AvailablePresets.Contains(value)) ResetPrompt(value); }
     partial void OnIsBusyChanged(bool value) { RefreshCommands(); OnPropertyChanged(nameof(IsProcessing)); OnPropertyChanged(nameof(SettingsHint)); }
     partial void OnIsInitializingChanged(bool value) => RefreshCommands();
+    partial void OnIsSavingSettingsChanged(bool value) => RefreshCommands();
     partial void OnProfileNameChanged(string value) => PromptChanged();
     partial void OnSystemTemplateChanged(string value) => PromptChanged();
     partial void OnUserTemplateChanged(string value) => PromptChanged();
-    private void PromptChanged() { if (!_loadingSettings) HasUnsavedSettings = true; ResetEngineStatus(); }
-    partial void OnHasUnsavedSettingsChanged(bool value) { OnPropertyChanged(nameof(SettingsHint)); if (value) SettingsStatus = ""; }
+    partial void OnHasUnsavedSettingsChanged(bool value) { OnPropertyChanged(nameof(SettingsHint)); OnPropertyChanged(nameof(SettingsFooterStatus)); if (value) SettingsStatus = ""; }
     partial void OnTaskProviderIndexChanged(int value) { OnPropertyChanged(nameof(TaskPromptSummary)); OnPropertyChanged(nameof(TaskServiceSummary)); RefreshCommands(); }
     partial void OnPageChanged(AppPage value) { OnPropertyChanged(nameof(IsWorkspace)); OnPropertyChanged(nameof(IsSettings)); OnPropertyChanged(nameof(IsLogs)); OnPropertyChanged(nameof(CanAcceptDrop)); }
     partial void OnStepChanged(WorkflowStep value) { OnPropertyChanged(nameof(IsFileStep)); OnPropertyChanged(nameof(IsOptionsStep)); OnPropertyChanged(nameof(IsResultsStep)); RefreshCommands(); }
@@ -200,8 +200,9 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         RefreshCredentialCommands();
         OnPropertyChanged(nameof(CanRun)); OnPropertyChanged(nameof(CanExport)); OnPropertyChanged(nameof(CanConfigure)); OnPropertyChanged(nameof(CanRetryCue)); OnPropertyChanged(nameof(CanPreview));
         RunCommand.NotifyCanExecuteChanged(); RetryCueCommand.NotifyCanExecuteChanged(); ExportCommand.NotifyCanExecuteChanged(); PreviewRequestCommand.NotifyCanExecuteChanged();
-        ChooseMediaCommand.NotifyCanExecuteChanged(); ChooseModelCommand.NotifyCanExecuteChanged(); SaveSettingsCommand.NotifyCanExecuteChanged(); TestEngineCommand.NotifyCanExecuteChanged(); ResetPromptCommand.NotifyCanExecuteChanged();
+        ChooseMediaCommand.NotifyCanExecuteChanged(); ChooseModelCommand.NotifyCanExecuteChanged(); SaveSettingsCommand.NotifyCanExecuteChanged(); TestEngineCommand.NotifyCanExecuteChanged(); RefreshPromptCommands();
         DownloadModelCommand.NotifyCanExecuteChanged();
+        DownloadLlamaCommand.NotifyCanExecuteChanged(); ChooseLlamaServerCommand.NotifyCanExecuteChanged();
         CopyPromptVariableCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(CanAcceptDrop)); OnPropertyChanged(nameof(CanGoToOptions)); OnPropertyChanged(nameof(CanGoToResults)); OnPropertyChanged(nameof(CanStartNew));
         OnPropertyChanged(nameof(CanResume));
@@ -229,7 +230,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     }
     [RelayCommand] private void ConfigureSpeech() { SettingsSectionIndex = 0; ShowSettings(); }
     [RelayCommand] private void ConfigureTranslation() { if (CanConfigure) ProviderIndex = TaskProviderIndex; SettingsSectionIndex = 1; ShowSettings(); }
-    [RelayCommand] private void ConfigurePrompt() { if (CanConfigure) ProviderIndex = TaskProviderIndex; SettingsSectionIndex = 2; ShowSettings(); }
+    [RelayCommand] private void ConfigurePrompt() { if (CanConfigure) { ProviderIndex = TaskProviderIndex; SelectedPrompt = AssociatedPrompt; } SettingsSectionIndex = 2; ShowSettings(); }
     [RelayCommand(CanExecute = nameof(CanConfigure))] private void FileStep() => Step = WorkflowStep.File;
     [RelayCommand(CanExecute = nameof(CanGoToOptions))] private void OptionsStep() { if (CanGoToOptions) Step = WorkflowStep.Options; }
     [RelayCommand(CanExecute = nameof(CanGoToResults))] private void ResultsStep() => Step = WorkflowStep.Results;
@@ -239,8 +240,11 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     private Task NextStepAsync() => ExecuteAsync(async token =>
     {
         if (!IsUnlocked || !string.IsNullOrEmpty(SpeechCredentialHint)) throw new ServiceCredentialException("ElevenLabs");
-        var media = await _jobs.ProbeAsync(InputPath, _savedSettings, token);
-        MediaSummary = $"时长 {media.Duration:hh\\:mm\\:ss}";
+        await PrepareAsync("正在检查媒体…", async _ =>
+        {
+            var media = await _jobs.ProbeAsync(InputPath, _savedSettings, token);
+            MediaSummary = $"时长 {media.Duration:hh\\:mm\\:ss}";
+        }, token);
         Step = WorkflowStep.Options;
     }, probing: true);
     [RelayCommand]
@@ -259,8 +263,10 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
                 SettingsChanged(this, new(nameof(AppSettings.Provider)));
                 _loadingSettings = false;
             }
+            InitializePromptLibrary();
             _savedSettings = ConfigurationStore.Snapshot(Settings); ApplyTaskDefaults(); HasUnsavedSettings = false;
             AddLog("设置已加载。");
+            if (!string.IsNullOrWhiteSpace(_store.LastLoadNotice)) { SettingsStatus = _store.LastLoadNotice; AddLog(SettingsStatus); }
         }
         catch (Exception exception) { ReportError(exception); }
         finally { _loadingSettings = false; IsInitializing = false; }
@@ -277,39 +283,57 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         try
         {
             var file = await _dialogs.OpenAsync("选择模型文件", ["*.gguf"]);
-            if (file is not null) await VerifySelectedModelAsync(file);
+            if (file is not null) SelectModelFile(file);
         }
         catch (Exception exception) { ReportError(exception); }
     }
     [RelayCommand(CanExecute = nameof(CanConfigure))]
     private async Task SaveSettingsAsync()
     {
-        try { CaptureProfile(); await _store.SaveAsync(Settings, Secrets); _savedSettings = ConfigurationStore.Snapshot(Settings); HasUnsavedSettings = false; SettingsStatus = "设置已保存"; OnPropertyChanged(nameof(TaskPromptSummary)); OnPropertyChanged(nameof(TaskServiceSummary)); Error = ""; AddLog("设置和提示词已保存。"); RefreshCommands(); }
+        if (!CanConfigure) return;
+        IsSavingSettings = true;
+        try
+        {
+            var snapshot = ConfigurationStore.Snapshot(Settings);
+            if (!CommitPromptEditor(snapshot)) return;
+            await _store.SaveAsync(snapshot, Secrets);
+            Settings.SourceCode = snapshot.SourceCode; Settings.SourceLanguage = snapshot.SourceLanguage;
+            Settings.ModelFiles = new(snapshot.ModelFiles, StringComparer.Ordinal);
+            Settings.PromptLibrary = new(snapshot.PromptLibrary, StringComparer.Ordinal);
+            if (_selectedPrompt is not null && HasPromptEdits) _selectedPrompt = snapshot.FindPrompt(_selectedPrompt.Id);
+            HasPromptEdits = false; RefreshPromptItems();
+            OnPropertyChanged(nameof(SelectedPrompt)); OnPropertyChanged(nameof(VisibleSelectedPrompt));
+            _savedSettings = snapshot; HasUnsavedSettings = false; SettingsStatus = "设置已保存";
+            OnPropertyChanged(nameof(TaskPromptSummary)); OnPropertyChanged(nameof(TaskServiceSummary));
+            Error = ""; AddLog("设置和提示词已保存。"); RefreshCommands();
+        }
         catch (Exception exception) { ReportError(exception); }
-    }
-    [RelayCommand(CanExecute = nameof(CanConfigure))]
-    private void ResetPrompt(string? name)
-    {
-        var profile = IsLocal ? name == PromptPresets.LocalSimple.Name ? PromptPresets.LocalSimple :
-            name == PromptPresets.Local.Name ? PromptPresets.Local : SelectedEmbeddedModel.DefaultProfile :
-            name == PromptPresets.Concise.Name ? PromptPresets.Concise : PromptPresets.Cloud;
-        Settings.SetProfile(profile);
-        LoadProfile();
+        finally { IsSavingSettings = false; }
     }
     [RelayCommand(CanExecute = nameof(CanRun))]
     private Task RunAsync() => ExecuteAsync(async token =>
     {
         if (!IsUnlocked || !string.IsNullOrEmpty(RunCredentialHint)) return;
-        var snapshot = TaskSettings(); ConfigurationStore.Validate(snapshot);
-        if (string.IsNullOrWhiteSpace(ElevenLabsKey)) throw new ServiceCredentialException("ElevenLabs");
-        if (snapshot.Provider != TranslationProvider.Local && string.IsNullOrWhiteSpace(KeyFor(snapshot.Provider))) throw new ServiceCredentialException("翻译服务");
-        if (snapshot.Provider == TranslationProvider.Local) await Task.Run(() => EmbeddedModelOptions.VerifyIdentityAsync(snapshot.ModelPath, token, snapshot.ModelSha256), token);
-        var media = await _jobs.ProbeAsync(InputPath, snapshot, token);
-        MediaSummary = $"时长 {media.Duration:hh\\:mm\\:ss}";
+        var snapshot = TaskSettings();
+        await PrepareAsync("正在检查设置…", async progress =>
+        {
+            ConfigurationStore.Validate(snapshot);
+            if (string.IsNullOrWhiteSpace(ElevenLabsKey)) throw new ServiceCredentialException("ElevenLabs");
+            if (snapshot.Provider != TranslationProvider.Local && string.IsNullOrWhiteSpace(KeyFor(snapshot.Provider))) throw new ServiceCredentialException("翻译服务");
+            if (snapshot.Provider == TranslationProvider.Local)
+            {
+                await _jobs.ValidateLocalAsync(snapshot, token, progress);
+                await FlushPreparationAsync();
+            }
+            SetPreparationStage("正在检查媒体…");
+            var media = await _jobs.ProbeAsync(InputPath, snapshot, token);
+            MediaSummary = $"时长 {media.Duration:hh\\:mm\\:ss}";
+        }, token);
         _jobSettings = snapshot; _jobInputPath = InputPath; _isComplete = false; Step = WorkflowStep.Results;
         SetRows([]);
         _hasStartedProcessing = true;
         Status = "识别中";
+        AddLog("开始识别语音。");
         var source = await _jobs.TranscribeAsync(InputPath, snapshot, ElevenLabsKey, new Progress<TranscriptionProgress>(value => Post(token, () => { Status = Stage(value.Stage); AddLog($"{Status} {value.ChunkIndex?.ToString() ?? ""}/{value.TotalChunks?.ToString() ?? ""}"); })), token);
         SetRows(source.Cues); AddLog($"识别完成：请求 {source.AsrRequests}，缓存 {source.CacheHits}。");
         if (source.Cues.Count == 0) { CanContinue = false; Status = "未识别到语音"; return; }
@@ -356,14 +380,19 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         if (value.CueIds.Count > 0) AddLog($"{Status}：{string.Join(", ", value.CueIds)}");
     }
     [RelayCommand]
-    private void Cancel() { if (IsBusy) { if (_isMediaJob) Status = "正在取消…"; _cancellation?.Cancel(); } }
+    private void Cancel() { if (IsBusy) { if (_isMediaJob) Status = "正在取消…"; if (IsPreparing) { PreparationStatus = "正在取消…"; if (_preparationEngineTest) EngineStatus = "正在取消…"; } _cancellation?.Cancel(); } }
     [RelayCommand(CanExecute = nameof(CanTestEngine))]
     private Task TestEngineAsync() => ExecuteAsync(async token =>
     {
         if (!string.IsNullOrEmpty(EngineCredentialHint)) return;
-        CaptureProfile(); var snapshot = ConfigurationStore.Snapshot(Settings); ConfigurationStore.Validate(snapshot);
-        EngineStatus = IsLocal ? "正在测试本地翻译…" : "正在测试连接…";
-        EngineStatus = await _jobs.TestEngineAsync(snapshot, KeyFor(snapshot.Provider), token); AddLog(EngineStatus);
+        var snapshot = ConfigurationStore.Snapshot(Settings);
+        string result = "";
+        await PrepareAsync("正在检查翻译设置…", async progress =>
+        {
+            ConfigurationStore.Validate(snapshot, validateAllProfiles: false); ConfigurationStore.ValidateSecrets(snapshot, Secrets);
+            result = await _jobs.TestEngineAsync(snapshot, KeyFor(snapshot.Provider), token, progress);
+        }, token, engineTest: true);
+        EngineStatus = result; AddLog(EngineStatus);
         if (!string.IsNullOrWhiteSpace(_jobs.EngineDiagnostic)) AddLog(_jobs.EngineDiagnostic);
     });
     [RelayCommand(CanExecute = nameof(CanPreview))]
@@ -403,13 +432,13 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         catch (OperationCanceledException) when (token.IsCancellationRequested)
         {
             if (mediaJob) { CanContinue = _hasStartedProcessing; MarkUnfinishedRows(CueTranslationState.Cancelled); }
-            else if (!probing && !IsModelDownloading) EngineStatus = "测试已取消";
+            else if (!probing && !IsModelDownloading && !IsLlamaInstalling) EngineStatus = "测试已取消";
             if (mediaJob) Status = "已取消"; AddLog("已取消");
         }
         catch (Exception exception)
         {
             if (mediaJob) { CanContinue = exception is TranscriptionFailedException || (_hasStartedProcessing && exception is TimeoutException or HttpRequestException); MarkUnfinishedRows(CueTranslationState.Failed); }
-            else if (!probing && !IsModelDownloading) EngineStatus = "测试失败";
+            else if (!probing && !IsModelDownloading && !IsLlamaInstalling) EngineStatus = "测试失败";
             if (mediaJob) Status = "处理未完成"; ReportError(exception);
             if (mediaJob && exception is ServiceCredentialException credential)
             { configureAfter = credential.Service == "ElevenLabs" ? ConfigureSpeech : ConfigureTranslation; }
@@ -445,6 +474,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         if (exception is TranscriptionFailedException failure)
             foreach (var item in failure.Categories) AddLog($"音频片段 {item.Key + 1}：{item.Value}");
         AddLog(Diagnostic);
+        if (exception is LocalTranslationException local && !string.IsNullOrWhiteSpace(local.Diagnostic)) AddLog(local.Diagnostic);
     }
     private string Sanitize(string value)
     { foreach (var key in Secrets.Where(key => !string.IsNullOrWhiteSpace(key))) value = value.Replace(key, "[凭据已隐藏]", StringComparison.Ordinal); return value; }
@@ -459,6 +489,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         if (_credentialOperation is not null) await _credentialOperation;
         await _jobs.DisposeAsync(); _credentials.Dispose(); LoadCredentials(); _credentialCancellation.Dispose();
         _modelHttp?.Dispose();
+        _llamaHttp?.Dispose();
         Settings.PropertyChanged -= SettingsChanged;
     }
 }

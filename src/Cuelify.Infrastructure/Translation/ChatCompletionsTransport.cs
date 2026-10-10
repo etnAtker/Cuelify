@@ -63,7 +63,6 @@ public sealed class OpenAiCompatibleTranslationEngine : ITranslationEngine
 {
     private readonly ChatCompletionsTransport _transport;
     private readonly CloudTranslationOptions _options;
-    public TranslationOutputFormat OutputFormat => TranslationOutputFormat.CueIdJson;
     public string CacheIdentity { get; }
     public OpenAiCompatibleTranslationEngine(HttpClient http, Func<string?> apiKeyProvider, CloudTranslationOptions options)
     {
@@ -81,7 +80,6 @@ public sealed class DeepSeekOfficialProvider : ITranslationEngine
     private readonly ChatCompletionsTransport _transport;
     private readonly CloudTranslationOptions _options;
     private readonly DeepSeekThinkingOptions _thinking;
-    public TranslationOutputFormat OutputFormat => TranslationOutputFormat.CueIdJson;
     public string CacheIdentity { get; }
     public DeepSeekOfficialProvider(HttpClient http, Func<string?> apiKeyProvider, CloudTranslationOptions options, DeepSeekThinkingOptions thinking)
     {

@@ -25,6 +25,11 @@ public sealed class PromptVariableTests
         model.ShowSettingsCommand.Execute(null); model.SettingsSectionIndex = 2;
         await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => { }, Avalonia.Threading.DispatcherPriority.Background);
         var settings = window.FindControl<SettingsView>("SettingsPage")!;
+        var launcher = settings.FindControl<Button>("PromptVariablesButton")!;
+        var launcherPoint = launcher.TranslatePoint(new Point(8, 8), window)!.Value;
+        window.MouseDown(launcherPoint, MouseButton.Left); window.MouseUp(launcherPoint, MouseButton.Left);
+        Assert.True(launcher.Flyout!.IsOpen);
+        window.UpdateLayout(); AvaloniaHeadlessPlatform.ForceRenderTimerTick(2);
         var list = settings.FindControl<ItemsControl>("PromptVariableList")!;
         using (var frame = window.CaptureRenderedFrame()) Assert.NotNull(frame);
         var buttons = list.GetVisualDescendants().OfType<Button>().ToArray();
@@ -44,18 +49,24 @@ public sealed class PromptVariableTests
         var target = buttons[0]; target.BringIntoView(); Assert.True(target.Focus(NavigationMethod.Pointer));
         await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => { }, Avalonia.Threading.DispatcherPriority.Background);
         using (var frame = window.CaptureRenderedFrame()) Assert.NotNull(frame);
-        var point = target.TranslatePoint(new Point(8, 8), window)!.Value;
-        ToolTip.SetShowDelay(target, 0); window.MouseMove(point);
+        var popup = TopLevel.GetTopLevel(target)!;
+        var point = target.TranslatePoint(new Point(8, 8), popup)!.Value;
+        ToolTip.SetShowDelay(target, 0); popup.MouseMove(point);
         await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => { }, Avalonia.Threading.DispatcherPriority.Background);
         Assert.True(ToolTip.GetIsOpen(target));
         ToolTip.SetIsOpen(target, false);
-        window.MouseDown(point, MouseButton.Left); window.MouseUp(point, MouseButton.Left);
+        popup.MouseDown(point, MouseButton.Left); popup.MouseUp(point, MouseButton.Left);
         Assert.NotNull(model.CopyPromptVariableCommand.ExecutionTask); await model.CopyPromptVariableCommand.ExecutionTask!;
         Assert.Equal("{source_language}", fixture.Dialogs.CopiedText); Assert.Equal("已复制 {source_language}", model.PromptVariableStatus);
         Assert.True(buttons[1].Focus(NavigationMethod.Tab)); Assert.True(ToolTip.GetIsOpen(buttons[1])); Assert.False(ToolTip.GetIsOpen(target));
-        window.KeyPress(Key.Enter, RawInputModifiers.None, PhysicalKey.Enter, null); await model.CopyPromptVariableCommand.ExecutionTask!;
+        popup.KeyPress(Key.Enter, RawInputModifiers.None, PhysicalKey.Enter, null); await model.CopyPromptVariableCommand.ExecutionTask!;
         Assert.Equal("{target_language}", fixture.Dialogs.CopiedText);
-        window.KeyPress(Key.Escape, RawInputModifiers.None, PhysicalKey.Escape, null); Assert.False(ToolTip.GetIsOpen(buttons[1]));
+        popup.KeyPress(Key.Escape, RawInputModifiers.None, PhysicalKey.Escape, null); Assert.False(ToolTip.GetIsOpen(buttons[1]));
+        Assert.True(buttons[2].Focus(NavigationMethod.Directional)); Assert.True(ToolTip.GetIsOpen(buttons[2]));
+        Assert.False(ToolTip.GetIsOpen(buttons[1]));
+        popup.KeyPress(Key.Escape, RawInputModifiers.None, PhysicalKey.Escape, null); Assert.False(ToolTip.GetIsOpen(buttons[2]));
+        launcher.Flyout.Hide(); launcher.Flyout.ShowAt(launcher);
+        await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => { }, Avalonia.Threading.DispatcherPriority.Background);
         var output = Environment.GetEnvironmentVariable("CUELIFY_UI_ARTIFACTS");
         if (!string.IsNullOrWhiteSpace(output))
         {

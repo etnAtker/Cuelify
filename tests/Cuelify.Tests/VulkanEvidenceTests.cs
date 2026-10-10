@@ -40,12 +40,10 @@ public sealed class VulkanEvidenceTests
         Assert.False(VulkanEvidence.Parse(string.Join('\n', Device, Buffer, Offload, "offloaded 0/33 layers to GPU")).HasGpuOffload);
 
     [Fact]
-    public void RequiresActuallyLoadedVulkanDlls()
+    public void SupportsSelectedDeviceLogFromCurrentLlamaCppWithoutAcceptingDiscoveryAlone()
     {
-        Assert.True(VulkanEvidence.HasVulkanNativeModules([
-            "C:/Cuelify/runtimes/win-x64/native/vulkan/llama.dll", "C:/Cuelify/runtimes/win-x64/native/vulkan/ggml-vulkan.dll"]));
-        Assert.False(VulkanEvidence.HasVulkanNativeModules([
-            "C:/Cuelify/runtimes/win-x64/native/avx2/llama.dll", "C:/Cuelify/runtimes/win-x64/native/vulkan/ggml-vulkan.dll"]));
-        Assert.False(VulkanEvidence.HasVulkanNativeModules(["C:/Cuelify/runtimes/win-x64/native/vulkan/llama.dll"]));
+        const string selected = "0.00.334.835 I llama_prepare_model_devices: using device Vulkan0 (NVIDIA GeForce RTX 4070 Laptop GPU) (0000:01:00.0) - 7180 MiB free";
+        Assert.True(VulkanEvidence.Parse(string.Join('\n', selected, Buffer, Offload)).HasGpuOffload);
+        Assert.False(VulkanEvidence.Parse(string.Join('\n', "common_param: - Vulkan0 : NVIDIA GPU", Buffer, Offload)).HasGpuOffload);
     }
 }

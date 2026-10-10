@@ -1,16 +1,27 @@
 using Cuelify.Core.Subtitles;
+using System.Text.Json.Serialization;
 
 namespace Cuelify.Core.Translation;
 
 public enum TranslationOutputFormat { CueIdJson, PlainText }
-public sealed record PromptProfile(string Name, string SystemTemplate, string UserTemplate, TranslationOutputFormat OutputFormat);
+public sealed record PromptProfile(string Name, string SystemTemplate, string UserTemplate, bool BatchTranslation)
+{
+    public string Id { get; init; } = Guid.NewGuid().ToString("N");
+    public string Description { get; init; } = "";
+    public int BatchSize { get; init; } = 12;
+    public int MaximumBatchCharacters { get; init; } = 6000;
+    [JsonIgnore] public TranslationOutputFormat OutputFormat => BatchTranslation ? TranslationOutputFormat.CueIdJson : TranslationOutputFormat.PlainText;
+    [JsonIgnore] public object ExecutionIdentity => new { SystemTemplate, UserTemplate, BatchTranslation,
+        BatchSize = BatchTranslation ? BatchSize : 1, MaximumBatchCharacters = BatchTranslation ? MaximumBatchCharacters : 0 };
+    public override string ToString() => Name;
+}
 public sealed record TranslationSettings
 {
     public string SourceLanguage { get; init; } = "自动识别";
     public string TargetLanguage { get; init; } = "中文";
     public string TargetStyle { get; init; } = "";
     public int BatchSize { get; init; } = 12;
-    public int Concurrency { get; init; } = 1;
+    public int Concurrency { get; init; } = 4;
     public int MaximumBatchCharacters { get; init; } = 6000;
     public int ContextCues { get; init; } = 5;
     public int FollowingContextCues { get; init; } = 2;
@@ -22,7 +33,7 @@ public sealed record TranslationSettings
     public void Validate()
     {
         if (string.IsNullOrWhiteSpace(SourceLanguage) || string.IsNullOrWhiteSpace(TargetLanguage) ||
-            BatchSize is < 1 or > 100 || Concurrency is < 1 or > 2 || MaximumBatchCharacters is < 100 or > 50000 ||
+            BatchSize is < 1 or > 100 || Concurrency is < 1 or > 8 || MaximumBatchCharacters is < 100 or > 50000 ||
             ContextCues is < 0 or > 8 || FollowingContextCues is < 0 or > 8 || MaximumContextCharacters is < 0 or > 20000 || MaximumAttempts is < 1 or > 5 ||
             RetryDelay < TimeSpan.Zero || MaximumRetryDelay < RetryDelay || MaximumRetryDelay > TimeSpan.FromMinutes(5))
             throw new ArgumentException("翻译语言、批次、上下文或重试配置无效。");
@@ -39,7 +50,6 @@ public sealed record TranslationRequest(IReadOnlyList<SubtitleCue> Cues, IReadOn
 public sealed record TranslationResponse(string Content);
 public interface ITranslationEngine
 {
-    TranslationOutputFormat OutputFormat { get; }
     // 仅包含非敏感配置的稳定签名；不得包含 Key。
     string CacheIdentity { get; }
     Task<TranslationResponse> TranslateAsync(TranslationRequest request, CancellationToken cancellationToken);

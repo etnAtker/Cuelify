@@ -1,4 +1,4 @@
-<UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:vm="using:Cuelify.Desktop.ViewModels" x:Class="Cuelify.Desktop.Views.WorkspaceView" x:DataType="vm:MainWindowViewModel">
+<UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:vm="using:Cuelify.Desktop.ViewModels" xmlns:views="using:Cuelify.Desktop.Views" x:Class="Cuelify.Desktop.Views.WorkspaceView" x:DataType="vm:MainWindowViewModel">
   <Grid RowDefinitions="Auto,Auto,Auto,*,Auto" Margin="32,24">
     <StackPanel Spacing="6">
       <TextBlock Classes="title" Text="生成字幕" />
@@ -96,19 +96,22 @@
         <TextBlock Classes="muted" Text="识别完成后，字幕会显示在这里。" />
       </StackPanel>
     </Grid>
-    <Grid Grid.Row="4" ColumnDefinitions="*,Auto" Margin="0,20,0,0">
-      <StackPanel Orientation="Horizontal" Spacing="12">
-        <Button Content="上一步" Command="{Binding FileStepCommand}" IsVisible="{Binding IsOptionsStep}" />
-        <Button Content="调整选项" Command="{Binding OptionsStepCommand}" IsVisible="{Binding IsResultsStep}" />
-        <Button Content="新建任务" Command="{Binding NewTaskCommand}" IsVisible="{Binding IsResultsStep}" />
-      </StackPanel>
-      <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="12">
-        <Button Content="取消" Command="{Binding CancelCommand}" IsVisible="{Binding IsBusy}" />
-        <Button x:Name="NextButton" Content="下一步" Command="{Binding NextStepCommand}" IsVisible="{Binding IsFileStep}" Classes="accent" />
-        <Button x:Name="RunButton" Content="{Binding RunButtonText}" Command="{Binding RunCommand}" IsVisible="{Binding IsOptionsStep}" Classes="accent" />
-        <Button Content="继续处理" Command="{Binding RunCommand}" IsVisible="{Binding ShowResume}" />
-        <Button x:Name="ExportButton" Content="导出 SRT…" Command="{Binding ExportCommand}" IsVisible="{Binding IsResultsStep}" Classes="accent" />
-      </StackPanel>
-    </Grid>
+    <StackPanel Grid.Row="4">
+      <views:PreparationStatusView x:Name="WorkspacePreparation" />
+      <Grid ColumnDefinitions="*,Auto" Margin="0,20,0,0">
+        <StackPanel Orientation="Horizontal" Spacing="12">
+          <Button Content="上一步" Command="{Binding FileStepCommand}" IsVisible="{Binding IsOptionsStep}" />
+          <Button Content="调整选项" Command="{Binding OptionsStepCommand}" IsVisible="{Binding IsResultsStep}" />
+          <Button Content="新建任务" Command="{Binding NewTaskCommand}" IsVisible="{Binding IsResultsStep}" />
+        </StackPanel>
+        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="12">
+          <Button Content="取消" Command="{Binding CancelCommand}" IsVisible="{Binding IsBusy}" />
+          <Button x:Name="NextButton" Content="下一步" Command="{Binding NextStepCommand}" IsVisible="{Binding IsFileStep}" Classes="accent" />
+          <Button x:Name="RunButton" Content="{Binding RunButtonText}" Command="{Binding RunCommand}" IsVisible="{Binding IsOptionsStep}" Classes="accent" />
+          <Button Content="继续处理" Command="{Binding RunCommand}" IsVisible="{Binding ShowResume}" />
+          <Button x:Name="ExportButton" Content="导出 SRT…" Command="{Binding ExportCommand}" IsVisible="{Binding IsResultsStep}" Classes="accent" />
+        </StackPanel>
+      </Grid>
+    </StackPanel>
   </Grid>
 </UserControl>

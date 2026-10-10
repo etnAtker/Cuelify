@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Cuelify.Infrastructure.Translation.Local;
@@ -7,6 +8,8 @@ namespace Cuelify.Desktop.ViewModels;
 
 public partial class MainWindowViewModel
 {
+    // 保持 ItemsSource 身份，避免列表重建重置下拉选择并递归回写配置。
+    private readonly ObservableCollection<EmbeddedModel> _embeddedModels = new(EmbeddedModelCatalog.Presets);
     private HttpClient? _modelHttp;
     private IModelDownloadService _downloads = null!;
     private bool _updatingModelFile;
@@ -14,21 +17,19 @@ public partial class MainWindowViewModel
     [ObservableProperty] private string modelDownloadStatus = "";
     [ObservableProperty] private double modelDownloadPercent;
     [ObservableProperty] private bool modelDownloadIndeterminate = true;
-    public IReadOnlyList<EmbeddedModel> EmbeddedModels => Settings.ModelFiles.ContainsKey(EmbeddedModelCatalog.Legacy.Id) || Settings.EmbeddedModelId == EmbeddedModelCatalog.Legacy.Id
-        ? EmbeddedModelCatalog.Presets.Append(EmbeddedModelCatalog.Legacy).ToArray() : EmbeddedModelCatalog.Presets;
+    public IReadOnlyList<EmbeddedModel> EmbeddedModels => _embeddedModels;
     public string ModelFileStatus => File.Exists(Settings.ModelPath) ? "模型文件已存在" : "尚未下载或选择模型文件";
     public EmbeddedModel SelectedEmbeddedModel
     {
         get => EmbeddedModelCatalog.Get(Settings.LocalOptions().ModelId);
         set
         {
-            if (!CanConfigure || value is null || value.Id == Settings.LocalOptions().ModelId) return;
-            if (IsLocal) CaptureProfile();
+            if (!CanConfigure || _updatingModelFile || value is null || value.Id == Settings.LocalOptions().ModelId) return;
             RememberModelFile();
             _updatingModelFile = true;
             try
             {
-                Settings.EmbeddedModelId = value.Id;
+                Settings.LocalModelId = value.Id;
                 var file = Settings.ModelFiles.GetValueOrDefault(value.Id) ?? new(_store.DefaultModelPath(value), "");
                 Settings.ModelPath = file.Path; Settings.ModelSha256 = file.Sha256;
             }
@@ -44,12 +45,14 @@ public partial class MainWindowViewModel
     }
     private void RememberModelFile() => Settings.ModelFiles[Settings.LocalOptions().ModelId] = new(Settings.ModelPath, Settings.ModelSha256);
     private void RefreshModelProperties()
-    { OnPropertyChanged(nameof(EmbeddedModels)); OnPropertyChanged(nameof(SelectedEmbeddedModel)); OnPropertyChanged(nameof(ModelFileStatus)); }
+    {
+        OnPropertyChanged(nameof(SelectedEmbeddedModel)); OnPropertyChanged(nameof(ModelFileStatus));
+    }
     private void ModelSettingsChanged(PropertyChangedEventArgs args)
     {
         if (args.PropertyName == nameof(Services.AppSettings.ModelPath) && !_updatingModelFile && !_loadingSettings)
         { Settings.ModelSha256 = ""; RememberModelFile(); ModelDownloadStatus = ""; }
-        if (args.PropertyName is nameof(Services.AppSettings.Provider) or nameof(Services.AppSettings.EmbeddedModelId) or nameof(Services.AppSettings.ModelPath))
+        if (args.PropertyName is nameof(Services.AppSettings.Provider) or nameof(Services.AppSettings.LocalModelId) or nameof(Services.AppSettings.ModelPath))
             RefreshModelProperties();
     }
     private void ApplyModelFile(EmbeddedModelFile file)
@@ -77,12 +80,13 @@ public partial class MainWindowViewModel
         ApplyModelFile(file); ModelDownloadStatus = "模型已下载并校验，保存设置后用于新的处理。";
         AddLog($"模型已下载并校验：{model.Name}。");
     });
-    private Task VerifySelectedModelAsync(string path) => RunModelOperationAsync(async token =>
+    private void SelectModelFile(string path)
     {
-        var progress = ModelProgress(token);
-        var file = await Task.Run(() => _downloads.VerifyAsync(SelectedEmbeddedModel, path, progress, token), token);
-        ApplyModelFile(file); ModelDownloadStatus = "模型已校验，保存设置后用于新的处理。";
-    });
+        var version = ModelFileVersion.Read(path);
+        using (new FileStream(version.Path, FileMode.Open, FileAccess.Read, FileShare.Read)) { }
+        ApplyModelFile(new(Path.GetFullPath(path), ""));
+        ModelDownloadStatus = "模型文件已选择，保存设置后用于新的处理。";
+    }
     private async Task RunModelOperationAsync(Func<CancellationToken, Task> action)
     {
         if (!CanConfigure) return;
