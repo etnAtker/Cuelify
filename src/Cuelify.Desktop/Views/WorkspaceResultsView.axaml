@@ -1,0 +1,43 @@
+<UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:vm="using:Cuelify.Desktop.ViewModels" x:Class="Cuelify.Desktop.Views.WorkspaceResultsView" x:DataType="vm:ProjectWorkspaceViewModel">
+  <UserControl.Styles><Style Selector="ListBox#CueList ListBoxItem"><Setter Property="Padding" Value="8,4" /><Setter Property="MinHeight" Value="0" /></Style></UserControl.Styles>
+  <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,*">
+    <Grid Margin="0,0,0,4">
+      <TabControl x:Name="ResultTabs" ItemsSource="{Binding Steps}" SelectedItem="{Binding SelectedStep}" MinHeight="40">
+        <TabControl.ItemTemplate><DataTemplate x:DataType="vm:StepItem"><TextBlock Text="{Binding Name}" /></DataTemplate></TabControl.ItemTemplate>
+        <TabControl.ContentTemplate><DataTemplate><Border Height="0" /></DataTemplate></TabControl.ContentTemplate>
+      </TabControl>
+    </Grid>
+    <ItemsControl x:Name="StepActions" Grid.Row="1" ItemsSource="{Binding StepOperations}" IsEnabled="{Binding CanProcess}" Margin="0,0,0,4" AutomationProperties.Name="本步骤操作"><ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel><ItemsControl.ItemTemplate><DataTemplate x:DataType="vm:ProcessChoice"><Button Content="{Binding Name}" ToolTip.Tip="{Binding Reason}" Command="{Binding $parent[UserControl].((vm:ProjectWorkspaceViewModel)DataContext).StepOperationCommand}" CommandParameter="{Binding}" Margin="0,0,6,4" /></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+    <Grid Grid.Row="2" ColumnDefinitions="*,Auto,Auto" Margin="0,0,0,4">
+      <ComboBox x:Name="VersionSelector" ItemsSource="{Binding Versions}" SelectedItem="{Binding Version}" IsVisible="{Binding HasVersions}" HorizontalAlignment="Stretch" AutomationProperties.Name="步骤版本"><ComboBox.ItemTemplate><DataTemplate x:DataType="vm:ResultVersion"><TextBlock Text="{Binding Label}" TextTrimming="CharacterEllipsis" /></DataTemplate></ComboBox.ItemTemplate></ComboBox>
+      <TextBlock Text="未开始" IsVisible="{Binding !HasVersions}" Classes="muted" VerticalAlignment="Center" />
+      <Button Grid.Column="1" x:Name="SetCurrentButton" Content="设为当前" Command="{Binding SetCurrentCommand}" IsVisible="{Binding HasVersions}" Margin="8,0,0,0" />
+      <Button Grid.Column="2" x:Name="ExportButton" Content="{Binding ExportText}" Command="{Binding ExportCommand}" IsVisible="{Binding CanExport}" Margin="8,0,0,0" />
+    </Grid>
+    <Grid Grid.Row="3" ColumnDefinitions="Auto,*,Auto" IsVisible="{Binding NeedsModel}" Margin="0,0,0,4">
+      <TextBlock Text="模型" VerticalAlignment="Center" Margin="0,0,8,0" />
+      <ComboBox x:Name="StepModelSelector" Grid.Column="1" ItemsSource="{Binding Models}" SelectedItem="{Binding StepModel}" HorizontalAlignment="Stretch" AutomationProperties.Name="步骤模型" />
+      <Button Grid.Column="2" Content="保存模型" Command="{Binding SaveStepModelCommand}" Margin="8,0,0,0" />
+    </Grid>
+    <Grid Grid.Row="3" ColumnDefinitions="Auto,*,Auto" IsVisible="{Binding ShowWords}" Margin="0,0,0,4"><TextBlock Text="ElevenLabs 模型" VerticalAlignment="Center" Margin="0,0,8,0" /><TextBox Grid.Column="1" Text="{Binding SpeechModel}" AutomationProperties.Name="识别模型" /><Button Grid.Column="2" Content="保存模型" Command="{Binding SaveSpeechModelCommand}" Margin="8,0,0,0" /></Grid>
+    <StackPanel Grid.Row="4" Spacing="4" Margin="0,0,0,4">
+      <TextBlock Text="{Binding ResultSettings}" Classes="muted" FontSize="11" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding ResultSettings}" />
+      <Expander Header="本步骤的问题" IsVisible="{Binding HasResultError}"><StackPanel Spacing="6"><TextBlock Text="{Binding ResultError}" Classes="error" TextWrapping="Wrap" /><ItemsControl ItemsSource="{Binding FailedUnits}"><ItemsControl.ItemTemplate><DataTemplate x:DataType="vm:FailedUnitRow"><StackPanel><TextBlock Text="{Binding Name}" /><TextBlock Text="{Binding Reason}" Classes="error" TextWrapping="Wrap" /></StackPanel></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel></Expander>
+    </StackPanel>
+    <Grid Grid.Row="5" IsVisible="{Binding ShowChunks}">
+      <ListBox ItemsSource="{Binding Chunks}" IsVisible="{Binding HasChunks}" AutomationProperties.Name="分片结果"><ListBox.ItemTemplate><DataTemplate x:DataType="vm:ChunkRow"><Grid ColumnDefinitions="36,*,Auto" Margin="0,8"><TextBlock Text="{Binding Number}" /><StackPanel Grid.Column="1" Spacing="4"><TextBlock Text="{Binding Time}" /><TextBlock Classes="muted" Text="{Binding Detail}" FontSize="12" /><TextBlock Text="{Binding Path}" Classes="muted" FontSize="11" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Path}" /></StackPanel><TextBlock Grid.Column="2" Text="{Binding State}" /></Grid></DataTemplate></ListBox.ItemTemplate></ListBox>
+      <TextBlock Text="尚未完成分片" Classes="muted" IsVisible="{Binding !HasChunks}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+    </Grid>
+    <Grid Grid.Row="5" IsVisible="{Binding ShowWords}" RowDefinitions="Auto,*">
+      <Grid ColumnDefinitions="44,*,96,96,70" Margin="12,8,12,6"><TextBlock Text="序号" Classes="muted" /><TextBlock Grid.Column="1" Text="词文本" Classes="muted" /><TextBlock Grid.Column="2" Text="开始" Classes="muted" /><TextBlock Grid.Column="3" Text="结束" Classes="muted" /><TextBlock Grid.Column="4" Text="说话人" Classes="muted" /></Grid>
+      <ListBox x:Name="WordList" Grid.Row="1" ItemsSource="{Binding Words}" IsVisible="{Binding HasWords}" AutomationProperties.Name="原始识别词"><ListBox.ItemTemplate><DataTemplate x:DataType="vm:WordRow"><Grid ColumnDefinitions="44,*,96,96,70" Margin="0,6"><TextBlock Text="{Binding Number}" /><TextBlock Grid.Column="1" Text="{Binding Text}" TextWrapping="Wrap" /><TextBlock Grid.Column="2" Text="{Binding Start}" FontSize="12" /><TextBlock Grid.Column="3" Text="{Binding End}" FontSize="12" /><TextBlock Grid.Column="4" Text="{Binding Speaker}" FontSize="12" TextTrimming="CharacterEllipsis" /></Grid></DataTemplate></ListBox.ItemTemplate></ListBox>
+      <TextBlock Grid.Row="1" Text="尚未完成识别" Classes="muted" IsVisible="{Binding !HasWords}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+    </Grid>
+    <Grid Grid.Row="5" IsVisible="{Binding ShowCues}" RowDefinitions="Auto,Auto,*">
+      <CheckBox Content="只看失败" IsChecked="{Binding FailedOnly}" IsVisible="{Binding ShowSubtitleTools}" HorizontalAlignment="Right" Margin="0,0,0,4" />
+      <Grid Grid.Row="1" ColumnDefinitions="98,*,*" Margin="12,0,12,6"><TextBlock Text="序号 / 时间" Classes="muted" FontSize="12" /><TextBlock Grid.Column="1" Text="原文" Classes="muted" /><TextBlock Grid.Column="2" Text="译文" Classes="muted" IsVisible="{Binding ShowTranslation}" /></Grid>
+      <ListBox x:Name="CueList" Grid.Row="2" ItemsSource="{Binding Cues}" Selection="{Binding Selection}" SelectionMode="Multiple" IsVisible="{Binding HasCues}" AutomationProperties.Name="字幕结果"><ListBox.ItemTemplate><DataTemplate x:DataType="vm:CueRow"><Grid ColumnDefinitions="98,*,*" Margin="0,4"><StackPanel Spacing="3"><TextBlock Text="{Binding Number}" /><TextBlock Text="{Binding Time}" Classes="muted" FontSize="11" TextWrapping="Wrap" /></StackPanel><TextBlock Grid.Column="1" Text="{Binding Source}" ToolTip.Tip="{Binding WordRange}" TextWrapping="Wrap" Margin="0,0,12,0" /><StackPanel Grid.Column="2" IsVisible="{Binding $parent[UserControl].((vm:ProjectWorkspaceViewModel)DataContext).ShowTranslation}"><TextBlock Text="{Binding Translation}" Classes.error="{Binding IsFailed}" TextWrapping="Wrap" /><TextBlock Text="{Binding FailureReason}" Classes.error="{Binding IsFailed}" IsVisible="{Binding IsFailed}" FontSize="11" TextWrapping="Wrap" /></StackPanel></Grid></DataTemplate></ListBox.ItemTemplate></ListBox>
+      <TextBlock Grid.Row="2" Text="{Binding EmptySubtitleText}" Classes="muted" IsVisible="{Binding !HasCues}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+    </Grid>
+  </Grid>
+</UserControl>

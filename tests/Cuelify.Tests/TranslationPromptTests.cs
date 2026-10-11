@@ -136,7 +136,7 @@ public sealed class TranslationPromptTests
     public void LocalOptionsRejectCpuOnlyAndUnknownPresetButDoNotInspectModelContent()
     {
         Assert.Throws<ArgumentException>(() => new EmbeddedModelOptions { GpuLayers = 0 }.Validate());
-        Assert.Throws<ArgumentException>(() => new EmbeddedModelOptions { MaximumTokens = 4096 }.Validate());
+        Assert.Throws<ArgumentException>(() => new EmbeddedModelOptions { MaximumTokens = 0 }.Validate());
         Assert.Throws<ArgumentException>(() => new EmbeddedModelOptions { ModelId = "unknown" }.Validate());
         Assert.Throws<FileNotFoundException>(() => ModelFileVersion.Read("other.gguf"));
     }

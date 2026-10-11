@@ -32,17 +32,16 @@ public partial class MainWindow : Window
     private void OnSettingsChanged(object? sender, PropertyChangedEventArgs args)
     { if (args.PropertyName == nameof(AppSettings.Theme) && sender is AppSettings settings) ApplyTheme(settings.Theme); }
     private void ApplyTheme(string theme) => RequestedThemeVariant = theme switch { "浅色" => ThemeVariant.Light, "深色" => ThemeVariant.Dark, _ => ThemeVariant.Default };
-    private void OnDrop(object? sender, DragEventArgs args)
+    private async void OnDrop(object? sender, DragEventArgs args)
     {
         if (DataContext is not MainWindowViewModel { CanAcceptDrop: true } model) return;
 #pragma warning disable CS0618
         var files = args.Data.GetFiles()?.ToArray();
 #pragma warning restore CS0618
-        if (files?.Length == 1 && files[0] is Avalonia.Platform.Storage.IStorageFile file)
-        {
-            var path = Avalonia.Platform.Storage.StorageProviderExtensions.TryGetLocalPath(file);
-            if (path is not null) model.InputPath = path;
-        }
+        var paths = files?.OfType<Avalonia.Platform.Storage.IStorageFile>()
+            .Select(Avalonia.Platform.Storage.StorageProviderExtensions.TryGetLocalPath).Where(p => p is not null).Cast<string>().ToArray() ?? [];
+        try { await model.AddMediaPathsAsync(paths); }
+        catch (Exception exception) { model.ReportMediaImportError(exception); }
     }
     private async void OnClosing(object? sender, WindowClosingEventArgs args)
     {

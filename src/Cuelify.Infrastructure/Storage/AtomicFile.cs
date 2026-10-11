@@ -11,7 +11,7 @@ public static class AtomicFile
     public static async Task<T?> ReadJsonAsync<T>(string path, CancellationToken cancellationToken) where T : class
     {
         if (!File.Exists(path)) return null;
-        await using var input = File.OpenRead(path);
+        await using var input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
         try { return await JsonSerializer.DeserializeAsync<T>(input, JsonOptions, cancellationToken) ?? throw new InvalidDataException("缓存为空。"); }
         catch (JsonException) { throw new InvalidDataException($"缓存 JSON 损坏：{Path.GetFileName(path)}。请检查该作业缓存，避免意外重复计费。"); }
     }

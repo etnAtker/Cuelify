@@ -9,6 +9,10 @@ namespace Cuelify.Desktop.Views;
 public partial class SettingsView : UserControl
 {
     public SettingsView() => InitializeComponent();
+    private async void OnCredentialLostFocus(object? sender, RoutedEventArgs args)
+    {
+        if (DataContext is MainWindowViewModel model) await model.SaveCredentialDraftAsync();
+    }
     private void OnPromptSelectionChanged(object? sender, SelectionChangedEventArgs args)
     {
         // 模态确认期间立即恢复高亮；模型仍保留原选择和草稿。

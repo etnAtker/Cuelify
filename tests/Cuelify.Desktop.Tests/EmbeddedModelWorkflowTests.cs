@@ -55,6 +55,9 @@ public sealed class EmbeddedModelWorkflowTests
         var firstPath = model.Settings.ModelPath; var firstHash = model.Settings.ModelSha256;
         Assert.Equal(Path.Combine(fixture.Root, EmbeddedModelCatalog.Default.DefaultFileName), firstPath);
         Assert.True(model.HasUnsavedSettings); Assert.Contains("校验", model.ModelDownloadStatus);
+        var local = model.Settings.ModelKey();
+        model.Settings.PipelineModelDefaults[model.Settings.GetPipeline().Id][Cuelify.Core.Projects.TaskStage.Subtitles] = local;
+        model.Settings.PipelineModelDefaults[model.Settings.GetPipeline().Id][Cuelify.Core.Projects.TaskStage.Translation] = local;
         await model.SaveSettingsCommand.ExecuteAsync(null); model.TaskProviderIndex = (int)TranslationProvider.Local; model.InputPath = "fixture.mp4";
         await model.RunCommand.ExecuteAsync(null); Assert.True(model.CanExport);
         model.SelectedEmbeddedModel = EmbeddedModelCatalog.Presets[1];

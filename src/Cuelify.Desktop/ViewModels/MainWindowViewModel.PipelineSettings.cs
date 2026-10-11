@@ -7,14 +7,14 @@ namespace Cuelify.Desktop.ViewModels;
 public partial class MainWindowViewModel
 {
     [ObservableProperty] private int pipelineEditingStage;
-    public string[] PipelineStageNames => [SegmentationStageLabel, PipelineModeIndex == 1 ? "补译与重翻" : "翻译"];
+    public string[] PipelineStageNames => ["分句", "翻译"];
     public bool IsEditingSegmentation => HasSegmentationStage && PipelineEditingStage == 0;
     public bool IsEditingTranslation => !HasSegmentationStage || PipelineEditingStage == 1;
     partial void OnPipelineEditingStageChanged(int value)
     { OnPropertyChanged(nameof(IsEditingSegmentation)); OnPropertyChanged(nameof(IsEditingTranslation)); ClearPromptPreview(); }
     [ObservableProperty] private string segmentationSystem = "";
     [ObservableProperty] private string segmentationUser = "";
-    [ObservableProperty] private int pipelineModeIndex = 0;
+    [ObservableProperty] private int segmentationMethodIndex = 0;
     [ObservableProperty] private int pipelineBlockSeconds = 24;
     [ObservableProperty] private int pipelineContextCharacters = 200;
     [ObservableProperty] private int pipelineBeforeCues = 5;
@@ -34,11 +34,11 @@ public partial class MainWindowViewModel
     [ObservableProperty] private string translationTopK = "";
     [ObservableProperty] private string translationRepeatPenalty = "";
     [ObservableProperty] private string translationMaximumTokens = "";
-    public string[] PipelineModeNames { get; } = ["直接翻译", "联合分句与翻译", "先分句后翻译"];
-    public bool HasSegmentationStage => PipelineModeIndex != 0;
+    public string[] SegmentationMethodNames { get; } = ["程序分句", "模型分句"];
+    public bool HasSegmentationStage => SegmentationMethodIndex != 0;
     public bool CanEditSegmentationSettings => CanEditPrompt && HasSegmentationStage;
-    public string PipelineSteps => PipelineModeIndex switch { 0 => "翻译 → 字幕显示", 1 => "联合分句与翻译 → 字幕显示", _ => "分句 → 翻译 → 字幕显示" };
-    public string SegmentationStageLabel => PipelineModeIndex == 1 ? "联合分句与翻译" : "分句";
+    public string PipelineSteps => "分片 → 识别词 → 分句 → 结果";
+    public string SegmentationStageLabel => "分句";
     private static double? StageNumber(string text) => string.IsNullOrWhiteSpace(text) ? null : double.Parse(text, CultureInfo.InvariantCulture);
     private static int? StageInteger(string text) => string.IsNullOrWhiteSpace(text) ? null : int.Parse(text, CultureInfo.InvariantCulture);
     private InferenceParameters ReadStageParameters(bool segmentation) => new()
@@ -60,7 +60,7 @@ public partial class MainWindowViewModel
     }
     partial void OnSegmentationSystemChanged(string value) { PromptChanged(); }
     partial void OnSegmentationUserChanged(string value) { PromptChanged(); }
-    partial void OnPipelineModeIndexChanged(int value) { PromptChanged(); OnPropertyChanged(nameof(HasSegmentationStage)); OnPropertyChanged(nameof(CanEditSegmentationSettings)); OnPropertyChanged(nameof(PipelineSteps)); OnPropertyChanged(nameof(SegmentationStageLabel)); OnPropertyChanged(nameof(PipelineStageNames)); OnPropertyChanged(nameof(IsEditingSegmentation)); OnPropertyChanged(nameof(IsEditingTranslation)); }
+    partial void OnSegmentationMethodIndexChanged(int value) { PromptChanged(); OnPropertyChanged(nameof(PipelineSegmentationNeedsModel)); OnPropertyChanged(nameof(HasSegmentationStage)); OnPropertyChanged(nameof(CanEditSegmentationSettings)); OnPropertyChanged(nameof(PipelineSteps)); OnPropertyChanged(nameof(SegmentationStageLabel)); OnPropertyChanged(nameof(PipelineStageNames)); OnPropertyChanged(nameof(IsEditingSegmentation)); OnPropertyChanged(nameof(IsEditingTranslation)); }
     partial void OnPipelineBlockSecondsChanged(int value) { PromptChanged(); }
     partial void OnPipelineContextCharactersChanged(int value) { PromptChanged(); }
     partial void OnPipelineBeforeCuesChanged(int value) { PromptChanged(); }

@@ -58,10 +58,14 @@ public partial class AppSettings : ObservableObject
     [ObservableProperty] private long maximumUploadBytes = 2_900_000_000;
     [ObservableProperty] private string theme = "系统";
     [ObservableProperty] private bool reduceMotion = true;
-    public const int CurrentSchemaVersion = 3;
+    public const int CurrentSchemaVersion = 5;
     public int SchemaVersion { get; init; } = CurrentSchemaVersion;
     public Dictionary<string, SubtitlePipelineProfile> PipelineLibrary { get; set; } = new(StringComparer.Ordinal);
-    public Dictionary<string, ModelPipelineBinding> ModelPipelineBindings { get; set; } = new(StringComparer.Ordinal);
+    public Dictionary<string, System.Text.Json.JsonElement> ArchivedPipelines { get; set; } = [];
+    public Dictionary<string, ModelProfile> Models { get; set; } = [];
+    public Dictionary<string, Dictionary<Cuelify.Core.Projects.TaskStage, string>> PipelineModelDefaults { get; set; } = [];
+    public Dictionary<Cuelify.Core.Projects.TaskStage, string> ExecutionModels { get; set; } = [];
+    public string DefaultPipelineId { get; set; } = SubtitlePipelinePresets.TwoStage.Id;
     [System.Text.Json.Serialization.JsonIgnore]
     public IEnumerable<SubtitlePipelineProfile> AllPipelines => SubtitlePipelinePresets.All.Concat(PipelineLibrary.Values);
     public string? TaskPipelineId { get; set; }
@@ -80,21 +84,14 @@ public partial class AppSettings : ObservableObject
     public SubtitlePipelineProfile GetPipeline(TranslationProvider? provider = null)
     {
         if (TaskPipelineId is { } task) return FindPipeline(task);
-        var selected = provider ?? Provider;
-        var fallback = selected == TranslationProvider.Local ? LocalOptions().Model.DefaultPipelineId : SubtitlePipelinePresets.Joint.Id;
-        return FindPipeline(ModelPipelineBindings.TryGetValue(ModelKey(selected), out var binding) ? binding.PipelineId : fallback);
+        return FindPipeline(DefaultPipelineId);
     }
-    public PromptProfile GetProfile(TranslationProvider? provider = null)
-    {
-        var pipeline = GetPipeline(provider);
-        return pipeline.Translation with { Parameters = pipeline.TranslationParameters, MaximumTextCharacters = pipeline.LineCharacters * 2,
-            ReadingCharactersPerSecond = pipeline.ReadingCharactersPerSecond };
-    }
-    public void AssociatePipeline(string id)
+    public PromptProfile GetProfile(TranslationProvider? provider = null) => GetPipeline(provider).EffectiveTranslation;
+    public void SetDefaultPipeline(string id)
     {
         _ = FindPipeline(id);
-        ModelPipelineBindings[ModelKey()] = new(ModelName(), id);
-        OnPropertyChanged(nameof(ModelPipelineBindings));
+        DefaultPipelineId = id;
+        OnPropertyChanged(nameof(DefaultPipelineId));
     }
     public void SavePipeline(SubtitlePipelineProfile profile)
     {
@@ -108,10 +105,17 @@ public partial class AppSettings : ObservableObject
     public void DeletePipeline(string id)
     {
         if (!PipelineLibrary.ContainsKey(id)) throw new ArgumentException("只能删除自定义管线。");
-        foreach (var item in ModelPipelineBindings.Where(item => item.Value.PipelineId == id).ToArray()) ModelPipelineBindings.Remove(item.Key);
+        PipelineModelDefaults.Remove(id);
+        if (DefaultPipelineId == id) DefaultPipelineId = SubtitlePipelinePresets.TwoStage.Id;
+        if (TaskPipelineId == id) TaskPipelineId = null;
         PipelineLibrary.Remove(id);
-        OnPropertyChanged(nameof(PipelineLibrary)); OnPropertyChanged(nameof(ModelPipelineBindings));
+        OnPropertyChanged(nameof(PipelineLibrary)); OnPropertyChanged(nameof(DefaultPipelineId));
     }
+    public TranslationSettings SegmentationSettings() => new()
+    {
+        SourceLanguage = SourceLanguage, TargetLanguage = TargetLanguage, TargetStyle = TargetStyle,
+        Concurrency = Provider == TranslationProvider.Local ? LocalConcurrency : TranslationConcurrency, MaximumAttempts = MaximumAttempts
+    };
     public TranslationSettings TranslationSettings() => new()
     {
         SourceLanguage = SourceLanguage, TargetLanguage = TargetLanguage, TargetStyle = TargetStyle,
@@ -120,6 +124,25 @@ public partial class AppSettings : ObservableObject
         ContextCues = GetPipeline().BeforeCues, FollowingContextCues = GetPipeline().AfterCues, MaximumAttempts = MaximumAttempts,
         MaximumBatchCharacters = GetProfile().BatchTranslation ? GetProfile().MaximumBatchCharacters : 50000, MaximumContextCharacters = GetPipeline().MaximumContextCharacters
     };
+    public AppSettings ForStep(Cuelify.Core.Projects.TaskStage kind, Cuelify.Core.Projects.MediaTaskDocument? task = null)
+    {
+        var result = ConfigurationStore.Snapshot(this);
+        if (kind is Cuelify.Core.Projects.TaskStage.Chunking or Cuelify.Core.Projects.TaskStage.Asr ||
+            kind == Cuelify.Core.Projects.TaskStage.Subtitles && GetPipeline().Method == SegmentationMethod.Program) return result;
+        var id = StepModelId(kind, task);
+        if (id is null) throw new ArgumentException("请为此步骤选择模型。");
+        {
+            if (!Models.TryGetValue(id, out var model)) throw new ArgumentException("步骤使用的模型不存在，请重新选择。");
+            model.Apply(result);
+            result.LlamaServerPath = LlamaServerPath; result.LlamaServerVersion = LlamaServerVersion;
+            if (result.Provider == TranslationProvider.Local && ModelFiles.TryGetValue(result.LocalOptions().ModelId, out var file))
+            { result.ModelPath = file.Path; result.ModelSha256 = file.Sha256; }
+        }
+        return result;
+    }
+    public string? StepModelId(Cuelify.Core.Projects.TaskStage kind, Cuelify.Core.Projects.MediaTaskDocument? task = null) =>
+        ExecutionModels.GetValueOrDefault(kind) ?? task?.ModelOverrides.GetValueOrDefault(kind) ??
+            PipelineModelDefaults.GetValueOrDefault(GetPipeline().Id)?.GetValueOrDefault(kind) ?? GetPipeline().DefaultModels.GetValueOrDefault(kind);
     public CloudTranslationOptions CloudOptions() => new()
     {
         BaseUrl = BaseUrl, Model = CloudModel, Temperature = Number(Temperature, "温度"), TopP = Number(TopP, "采样范围"),
@@ -151,5 +174,3 @@ public partial class AppSettings : ObservableObject
         return number;
     }
 }
-
-public sealed record ModelPipelineBinding(string ModelName, string PipelineId);

@@ -70,7 +70,9 @@ public sealed class DesktopTests
 
         void Click(int index, RawInputModifiers modifiers)
         {
-            var item = list.ContainerFromIndex(index)!;
+            window.UpdateLayout();
+            var item = list.ContainerFromIndex(index)!; item.BringIntoView(); window.UpdateLayout();
+            using (var updated = window.CaptureRenderedFrame()) Assert.NotNull(updated);
             var point = item.TranslatePoint(new Point(8, 8), window)!.Value;
             window.MouseDown(point, MouseButton.Left, modifiers);
             window.MouseUp(point, MouseButton.Left, modifiers);
@@ -123,11 +125,11 @@ public sealed class DesktopTests
     public async Task FileProbeAndSettingsRoundTripPreserveTaskChoicesWithoutStartingRecognition()
     {
         using var fixture = new Fixture(); await using var model = fixture.Model();
-        Assert.False(model.CanGoToOptions); Assert.True(model.CanAcceptDrop);
+        Assert.False(model.CanGoToOptions); model.ShowWorkspaceCommand.Execute(null); await model.AddMediaPathsAsync(["fixture.mp4"]); Assert.True(model.CanAcceptDrop);
         model.InputPath = "fixture.mp4";
         await model.NextStepCommand.ExecuteAsync(null);
         Assert.True(model.IsOptionsStep); Assert.Equal(0, fixture.Jobs.Transcriptions);
-        Assert.False(model.CanGoToResults); Assert.False(model.CanAcceptDrop);
+        Assert.False(model.CanGoToResults); Assert.True(model.CanAcceptDrop);
         model.TaskTargetLanguage = "日文"; model.TaskProviderIndex = 0;
         model.ConfigurePromptCommand.Execute(null);
         Assert.True(model.IsSettings); Assert.Equal(2, model.SettingsSectionIndex);
@@ -159,6 +161,7 @@ public sealed class DesktopTests
     {
         using var fixture = new Fixture(); await using var model = fixture.Model();
         model.InputPath = "fixture.mp4";
+        model.ShowWorkspaceCommand.Execute(null);
         fixture.Jobs.ProbeFailure = new InvalidDataException("无法读取媒体信息，请检查文件。");
         await model.NextStepCommand.ExecuteAsync(null);
         Assert.True(model.IsWorkspace); Assert.True(model.IsFileStep); Assert.False(model.CanGoToOptions);
@@ -243,12 +246,13 @@ public sealed class DesktopTests
         window.Show(); await model.InitializeCommand.ExecuteAsync(null); model.Settings.Theme = theme;
         var workspace = window.FindControl<WorkspaceView>("WorkspacePage")!;
         await Capture("选择文件");
-        var next = workspace.FindControl<Button>("NextButton")!;
-        Assert.True(next.IsEffectivelyVisible); Assert.False(next.IsEffectivelyEnabled);
-        model.InputPath = "fixture.mp4"; await model.NextStepCommand.ExecuteAsync(null);
+        Assert.True(model.IsProjects);
+        await model.AddMediaPathsAsync(["fixture.mp4"]); model.ShowWorkspaceCommand.Execute(null);
         await Capture("翻译选项");
-        Assert.Equal("自动识别", workspace.FindControl<ComboBox>("SourceLanguageBox")!.SelectedItem);
-        Assert.True(workspace.FindControl<Button>("RunButton")!.IsEffectivelyVisible);
+        model.Workspace.SettingsCommand.Execute(null);
+        Assert.Equal("自动识别", model.Workspace.SourceDraft);
+        Assert.True(model.Workspace.SettingsDialog); model.Workspace.CloseDialogCommand.Execute(null);
+        Assert.True(workspace.FindControl<Button>("MediaSettingsButton")!.IsEffectivelyVisible);
         model.ShowSettingsCommand.Execute(null);
         for (var section = 0; section < 4; section++) { model.SettingsSectionIndex = section; await Capture("设置-" + section); }
         model.ShowLogsCommand.Execute(null); await Capture("日志");
@@ -258,7 +262,7 @@ public sealed class DesktopTests
         {
             await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => { }, Avalonia.Threading.DispatcherPriority.Background);
             using var frame = window.CaptureRenderedFrame(); Assert.NotNull(frame);
-            var page = model.IsWorkspace ? (Control)workspace : model.IsSettings ? window.FindControl<SettingsView>("SettingsPage")! : window.FindControl<LogsView>("LogsPage")!;
+            var page = model.IsProjects ? (Control)window.FindControl<ProjectsView>("ProjectsPage")! : model.IsWorkspace ? workspace : model.IsSettings ? window.FindControl<SettingsView>("SettingsPage")! : window.FindControl<LogsView>("LogsPage")!;
             Assert.True(page.IsEffectivelyVisible); Assert.Equal(width - 80, page.Bounds.Width);
             var output = Environment.GetEnvironmentVariable("CUELIFY_UI_ARTIFACTS");
             if (!string.IsNullOrWhiteSpace(output)) { Directory.CreateDirectory(output); frame!.Save(Path.Combine(output, $"{name}-{width}-{theme}.png")); }
@@ -270,7 +274,7 @@ public sealed class DesktopTests
         using var fixture = new Fixture();
         var settings = fixture.Store.CreateDefaults(); settings.TargetLanguage = "日文"; settings.Provider = TranslationProvider.Local;
         var custom = SubtitlePipelinePresets.TwoStage with { Id = "custom-local", Name = "我的本地模板" };
-        settings.SavePipeline(custom); settings.AssociatePipeline(custom.Id);
+        settings.SavePipeline(custom); settings.SetDefaultPipeline(custom.Id);
         await fixture.Store.SaveAsync(settings, ["secret-eleven", "secret-ds"]);
         var loaded = await fixture.Store.LoadAsync();
         Assert.Equal("日文", loaded!.TargetLanguage);
@@ -293,7 +297,7 @@ public sealed class DesktopTests
     {
         using var fixture = new Fixture();
         var settings = new AppSettings();
-        settings.SavePipeline(SubtitlePipelinePresets.Joint with { Id = "secret-test", Name = "误贴管线", Segmentation = new("secret-from-session", "翻译") });
+        settings.SavePipeline(SubtitlePipelinePresets.TwoStage with { Id = "secret-test", Name = "误贴管线", Segmentation = new("secret-from-session", "翻译") });
         await Assert.ThrowsAsync<ArgumentException>(() => fixture.Store.SaveAsync(settings, ["secret-from-session"]));
     }
     [AvaloniaFact]
@@ -311,8 +315,8 @@ public sealed class DesktopTests
         model.CueSelection.Clear(); model.CueSelection.Select(1); Assert.True(model.CanRetryCue);
         await model.RetryCueCommand.ExecuteAsync(null);
         Assert.Equal("中文", fixture.Jobs.LastSettings!.TargetLanguage);
-        model.TaskTargetLanguage = "日文";
-        await model.RunCommand.ExecuteAsync(null);
+        model.Workspace.SettingsCommand.Execute(null); model.Workspace.TargetDraft = "日文"; await model.Workspace.SubmitDialogCommand.ExecuteAsync(null);
+        await WorkspaceTestActions.ExecuteAsync(model, "Translation:Retranslate");
         Assert.True(model.CanExport); Assert.Equal("日文", fixture.Jobs.LastSettings!.TargetLanguage);
     }
     [AvaloniaFact]
@@ -326,8 +330,8 @@ public sealed class DesktopTests
         await model.SaveSettingsCommand.ExecuteAsync(null);
         Assert.Contains("数值格式", model.Error);
         Assert.False(model.IsBusy); Assert.True(model.CanExport);
-        await model.RunCommand.ExecuteAsync(null);
-        Assert.Empty(model.Error); Assert.Equal("", fixture.Jobs.LastSettings!.Temperature);
+        Assert.False(model.RunCommand.CanExecute(null));
+        Assert.Equal("", fixture.Jobs.LastSettings!.Temperature);
     }
     [AvaloniaFact]
     public async Task ConcurrentRunIsIgnoredAndCancelLeavesRecoveryAvailable()
@@ -349,9 +353,9 @@ public sealed class DesktopTests
     {
         using var fixture = new Fixture(); fixture.Jobs.Partial = true; await using var model = fixture.Model();
         model.InputPath = "fixture.mp4"; await model.RunCommand.ExecuteAsync(null);
-        Assert.False(model.CanExport); Assert.Contains("1 条字幕翻译失败", model.Error);
+        Assert.False(model.CanExport); Assert.Contains("1 条字幕翻译失败", model.SelectedMedia!.Document.Translation.Error);
         Assert.DoesNotContain("cue-2", model.Error); Assert.Equal("翻译失败", model.Rows[1].Translation);
-        Assert.Equal("继续处理", model.RunButtonText); Assert.Equal(2, model.Rows[1].Number);
+        Assert.Equal("继续未完成部分", model.RunButtonText); Assert.Equal(2, model.Rows[1].Number);
         model.CueSelection.Clear(); model.CueSelection.Select(1); Assert.True(model.CanRetryCue);
         fixture.Jobs.Partial = false;
         await model.RetryCueCommand.ExecuteAsync(null);
@@ -420,23 +424,25 @@ public sealed class DesktopTests
         var window = new MainWindow { DataContext = model, Width = 900, Height = 640 };
         window.Show(); await model.InitializeCommand.ExecutionTask!;
         model.InputPath = "fixture.mp4"; await model.RunCommand.ExecuteAsync(null);
-        var list = window.FindControl<WorkspaceView>("WorkspacePage")!.FindControl<ListBox>("CueList")!;
+        var list = window.FindControl<WorkspaceView>("WorkspacePage")!.FindControl<WorkspaceResultsView>("Results")!.FindControl<ListBox>("CueList")!;
         using (var frame = window.CaptureRenderedFrame()) Assert.NotNull(frame);
         Click(0, RawInputModifiers.None); Click(2, RawInputModifiers.Control);
-        Assert.Equal(new[] { 0, 2 }, model.CueSelection.SelectedIndexes.Order().ToArray());
-        Assert.Equal("已选 2 条字幕", model.CueSelectionSummary);
+        Assert.Equal(new[] { 0, 2 }, model.Workspace.Selection.SelectedIndexes.Order().ToArray());
+        Assert.Equal(2, model.Workspace.Selection.Count);
         Click(1, RawInputModifiers.Shift);
-        Assert.Equal(new[] { 1, 2 }, model.CueSelection.SelectedIndexes.Order().ToArray());
-        await model.RetryCueCommand.ExecuteAsync(null);
+        Assert.Equal(new[] { 1, 2 }, model.Workspace.Selection.SelectedIndexes.Order().ToArray());
+        await model.Workspace.RetranslateSelectedCommand.ExecuteAsync(null);
         Assert.Equal(new[] { "cue-2", "cue-3" }, fixture.Jobs.Forced!.Order().ToArray());
-        Assert.Equal(new[] { 1, 2 }, model.CueSelection.SelectedIndexes.Order().ToArray());
+        Assert.Equal(new[] { 1, 2 }, model.Workspace.Selection.SelectedIndexes.Order().ToArray());
         window.Close();
 
         void Click(int index, RawInputModifiers modifiers)
         {
             list.ScrollIntoView(index);
             using (var frame = window.CaptureRenderedFrame()) Assert.NotNull(frame);
-            var item = list.ContainerFromIndex(index)!;
+            window.UpdateLayout();
+            var item = list.ContainerFromIndex(index)!; item.BringIntoView(); window.UpdateLayout();
+            using (var updated = window.CaptureRenderedFrame()) Assert.NotNull(updated);
             var point = item.TranslatePoint(new Point(8, 8), window)!.Value;
             window.MouseDown(point, MouseButton.Left, modifiers); window.MouseUp(point, MouseButton.Left, modifiers);
         }
@@ -454,15 +460,17 @@ public sealed class DesktopTests
         model.InputPath = "fixture.mp4"; await model.RunCommand.ExecuteAsync(null);
         await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => { }, Avalonia.Threading.DispatcherPriority.Background);
         var workspace = window.FindControl<WorkspaceView>("WorkspacePage")!;
-        var list = workspace.FindControl<ListBox>("CueList")!;
-        Assert.Same(model.CueSelection, list.Selection); Assert.Equal(SelectionMode.Multiple, list.SelectionMode);
+        var list = workspace.FindControl<WorkspaceResultsView>("Results")!.FindControl<ListBox>("CueList")!;
+        Assert.Same(model.Workspace.Selection, list.Selection); Assert.Equal(SelectionMode.Multiple, list.SelectionMode);
+        list.ScrollIntoView(1); window.UpdateLayout();
+        using (var visible = window.CaptureRenderedFrame()) Assert.NotNull(visible);
         var failedText = Assert.Single(list.GetVisualDescendants().OfType<TextBlock>(), text => text.Text == "翻译失败");
         Assert.Contains("error", failedText.Classes); Assert.Equal(Color.Parse(errorColor), Assert.IsAssignableFrom<ISolidColorBrush>(failedText.Foreground).Color);
         list.Selection.Select(0); list.Selection.Select(1);
-        Assert.Equal("已选 2 条字幕", model.CueSelectionSummary);
-        fixture.Jobs.Partial = false; await model.RetryCueCommand.ExecuteAsync(null);
+        Assert.Equal(2, model.Workspace.Selection.Count);
+        fixture.Jobs.Partial = false; await model.Workspace.RetranslateSelectedCommand.ExecuteAsync(null);
         await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => { }, Avalonia.Threading.DispatcherPriority.Background);
-        Assert.All(model.Rows, row => Assert.False(row.IsFailed)); Assert.Equal(2, model.CueSelection.Count);
+        Assert.All(model.Rows, row => Assert.False(row.IsFailed)); Assert.Equal(2, model.Workspace.Selection.Count);
         Assert.DoesNotContain(list.GetVisualDescendants().OfType<TextBlock>(), text => text.Classes.Contains("error"));
         using var frame = window.CaptureRenderedFrame(); Assert.NotNull(frame);
         window.Close();
@@ -499,7 +507,7 @@ public sealed class DesktopTests
         using var fixture = new Fixture(); fixture.Jobs.Partial = true; fixture.Jobs.FailureReason = reason;
         await using var model = fixture.Model(); model.InputPath = "fixture.mp4";
         await model.RunCommand.ExecuteAsync(null);
-        Assert.Contains(expected, model.Error); Assert.DoesNotContain("cue-2", model.Error);
+        Assert.Contains(expected, model.Rows[1].FailureReason); Assert.Empty(model.Error);
         Assert.Equal("翻译失败", model.Rows[1].Translation); Assert.Equal("中文译文", model.Rows[0].Translation);
     }
 
@@ -532,7 +540,7 @@ public sealed class DesktopTests
         model.CancelCommand.Execute(null); await run;
         Assert.Equal("已取消", model.Rows[0].Translation);
         Assert.Equal("等待翻译", model.Rows[1].Translation);
-        Assert.Equal("继续处理", model.RunButtonText);
+        Assert.Equal("继续未完成部分", model.RunButtonText);
         fixture.Jobs.BlockTranslation = false;
         await model.RunCommand.ExecuteAsync(null);
         Assert.True(model.CanExport);
@@ -551,7 +559,7 @@ public sealed class DesktopTests
         Assert.Equal("翻译失败", model.Rows[0].Translation);
         Assert.Equal("等待翻译", model.Rows[1].Translation);
         Assert.Contains("检查网络", model.Error); Assert.DoesNotContain("HttpRequestException", model.Error);
-        Assert.Equal("继续处理", model.RunButtonText);
+        Assert.Equal("继续未完成部分", model.RunButtonText);
     }
 
     [AvaloniaFact]
@@ -650,12 +658,12 @@ public sealed class DesktopTests
         var window = new MainWindow { DataContext = model, Width = width, Height = height };
         window.Show(); await model.InitializeCommand.ExecutionTask!;
         var workspace = window.FindControl<WorkspaceView>("WorkspacePage")!;
-        Assert.False(workspace.FindControl<Button>("ExportButton")!.IsEffectivelyEnabled);
+        Assert.False(workspace.FindControl<WorkspaceResultsView>("Results")!.FindControl<Button>("ExportButton")!.IsEffectivelyEnabled);
         model.InputPath = "fixture.mp4"; await model.RunCommand.ExecuteAsync(null);
-        Assert.True(workspace.FindControl<Button>("ExportButton")!.IsEffectivelyEnabled);
-        Assert.Equal(2, workspace.FindControl<ListBox>("CueList")!.ItemCount);
+        Assert.True(workspace.FindControl<WorkspaceResultsView>("Results")!.FindControl<Button>("ExportButton")!.IsEffectivelyEnabled);
+        Assert.Equal(2, workspace.FindControl<WorkspaceResultsView>("Results")!.FindControl<ListBox>("CueList")!.ItemCount);
         using var frame = window.CaptureRenderedFrame(); Assert.NotNull(frame);
-        var button = workspace.FindControl<Button>("ExportButton")!;
+        var button = workspace.FindControl<WorkspaceResultsView>("Results")!.FindControl<Button>("ExportButton")!;
         Assert.True(button.Bounds.Width > 0);
         var output = Environment.GetEnvironmentVariable("CUELIFY_UI_ARTIFACTS");
         if (!string.IsNullOrWhiteSpace(output)) { Directory.CreateDirectory(output); frame!.Save(Path.Combine(output, $"window-{width}-{theme}.png")); }
@@ -763,13 +771,25 @@ internal sealed class FakeJobs : IDesktopJobService
         if (PreparationFailure is not null) throw PreparationFailure;
         progress?.Report(new(Cuelify.Infrastructure.Translation.Local.LocalPreparationStage.Ready));
     }
+    public int Preparations;
+    public string ChunkingHash = "fixture-sha";
+    public Cuelify.Core.Speech.WordToken[] SourceWords = [];
+    public Exception? GenerationFailure;
+    public Task<ChunkingResult> PrepareChunksAsync(string input, AppSettings settings, string directory, bool restart, IProgress<TranscriptionProgress> progress, CancellationToken token)
+    { Preparations++; return Task.FromResult(new ChunkingResult("fixture", TimeSpan.FromSeconds(5), ChunkingHash, "fixture.pcm", [])); }
+    public Task<TranscriptionResult> RecognizeChunksAsync(ChunkingResult prepared, AppSettings settings, string key, string directory, bool reuseShared,
+        IReadOnlySet<int>? retryChunks, IProgress<TranscriptionProgress> progress, CancellationToken token) => TranscribeAsync("fixture.mp4", settings, key, progress, token);
+    public Task<SubtitlePipelineResult> GenerateStageAsync(TranscriptionResult source, AppSettings settings, string key, string directory, bool reuseShared,
+        IReadOnlySet<string>? retryBlocks, IProgress<TranslationProgress> progress, CancellationToken token) => GenerateCuesAsync(source, settings, key, progress, token);
+    public Task<TranslationResult> TranslateStageAsync(IReadOnlyList<SubtitleCue> cues, AppSettings settings, string key, string directory, bool reuseShared,
+        IReadOnlySet<string>? selectedIds, IProgress<TranslationProgress> progress, CancellationToken token) => TranslateAsync(cues, settings, key, selectedIds, progress, token);
     public async Task<TranscriptionResult> TranscribeAsync(string input, AppSettings settings, string key, IProgress<TranscriptionProgress> progress, CancellationToken token)
     {
         RecognitionSettings = settings;
         Transcriptions++; Started.TrySetResult();
         if (Block) await Task.Delay(Timeout.Infinite, token);
         if (Failure is not null) throw Failure;
-        return new("fixture", TimeSpan.FromSeconds(5), [], [], SourceCues, 0, 0, "fixture.srt");
+        return new("fixture", TimeSpan.FromSeconds(5), [], SourceWords, SourceCues, 0, 0, "fixture.srt");
     }
     public async Task<TranslationResult> TranslateAsync(IReadOnlyList<SubtitleCue> cues, AppSettings settings, string key, IReadOnlySet<string>? force, IProgress<TranslationProgress> progress, CancellationToken token)
     {
@@ -787,13 +807,13 @@ internal sealed class FakeJobs : IDesktopJobService
         return new TranslationResult(translated, translated.Where(cue => cue.TranslatedText is null).Select(cue => cue.Id).ToArray(), 0, 0)
         { FailureReasons = FailureReason is null ? new Dictionary<string, string>() : new Dictionary<string, string> { ["cue-2"] = FailureReason } };
     }
-    public bool JointComplete;
     public int Generations;
     public AppSettings? GenerationSettings;
     public Task<SubtitlePipelineResult> GenerateCuesAsync(TranscriptionResult source, AppSettings settings, string key, IProgress<TranslationProgress> progress, CancellationToken token)
     {
         GenerationSettings = settings; Generations++;
-        return Task.FromResult(new SubtitlePipelineResult(JointComplete ? source.Cues.Select(c => c with { TranslatedText = "联合译文" }).ToArray() : source.Cues, [], 0, 0));
+        if (GenerationFailure is not null) throw GenerationFailure;
+        return Task.FromResult(new SubtitlePipelineResult(SourceCues, SourceCues.Select((c, i) => new SourceWordRange(i, i)).ToArray(), 0, 0));
     }
     public async Task<string> TestEngineAsync(AppSettings settings, string key, CancellationToken token, IProgress<Cuelify.Infrastructure.Translation.Local.LocalPreparationProgress>? progress = null)
     {

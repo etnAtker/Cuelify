@@ -18,9 +18,8 @@ public sealed class CredentialWorkflowTests
         var window = new MainWindow { DataContext = model }; window.Show(); await model.InitializeCommand.ExecuteAsync(null);
         model.InputPath = "fixture.mp4"; await model.NextStepCommand.ExecuteAsync(null); model.TaskProviderIndex = 0; model.ProviderIndex = 0;
         model.Settings.BaseUrl = "https://new.example/v1"; await model.ConfirmCompatibleAddressCommand.ExecuteAsync(null);
-        var button = window.FindControl<WorkspaceView>("WorkspacePage")!.FindControl<Button>("RunButton")!;
-        Assert.False(button.IsEffectivelyEnabled);
-        await model.SaveSettingsCommand.ExecuteAsync(null); Assert.True(button.IsEffectivelyEnabled);
+        Assert.False(model.CanRun);
+        await model.SaveSettingsCommand.ExecuteAsync(null); Assert.True(model.CanRun);
         window.Close();
     }
 
@@ -87,7 +86,7 @@ public sealed class CredentialWorkflowTests
         using var fixture = new Fixture(); await using var model = fixture.Model();
         model.InputPath = "fixture.mp4"; await model.NextStepCommand.ExecuteAsync(null);
         model.TranslationKey = "unsaved-draft";
-        model.LockCredentialsCommand.Execute(null);
+        await model.LockCredentialsCommand.ExecuteAsync(null);
         Assert.False(model.CanRun); Assert.False(model.CanNext); Assert.False(model.CanGoToOptions); Assert.False(model.CanTestEngine);
         Assert.Empty(model.ElevenLabsKey); Assert.Empty(model.TranslationKey);
         model.FileStepCommand.Execute(null); model.OptionsStepCommand.Execute(null); Assert.True(model.IsFileStep);
@@ -95,7 +94,7 @@ public sealed class CredentialWorkflowTests
         fixture.Dialogs.Password = "wrong-password"; await model.ManageMasterPasswordCommand.ExecuteAsync(null);
         Assert.False(model.IsUnlocked); Assert.Contains("主密码不正确", model.CredentialStatus);
         fixture.Dialogs.Password = "test-master-password"; await model.ManageMasterPasswordCommand.ExecuteAsync(null);
-        Assert.True(model.CanNext); Assert.Equal("fake-translation", model.TranslationKey);
+        Assert.True(model.CanNext); Assert.Equal("unsaved-draft", model.TranslationKey);
         await using var fresh = new MainWindowViewModel(new FakeJobs(), fixture.Store, fixture.Dialogs);
         Assert.True(fresh.HasMasterPassword); Assert.False(fresh.IsUnlocked); Assert.Empty(fresh.ElevenLabsKey);
     }
@@ -110,7 +109,8 @@ public sealed class CredentialWorkflowTests
         Assert.Equal("deepseek-secret", fixture.Jobs.TranslationCredential);
         model.ProviderIndex = 0; model.CueSelection.Clear(); model.CueSelection.Select(0); await model.RetryCueCommand.ExecuteAsync(null);
         Assert.Equal("deepseek-secret", fixture.Jobs.TranslationCredential);
-        model.TaskProviderIndex = 0; await model.RunCommand.ExecuteAsync(null);
+        model.Workspace.StepModel = new("兼容模型", ConfigurationStore.Snapshot(model.Settings)); await model.Workspace.SaveStepModelCommand.ExecuteAsync(null);
+        await WorkspaceTestActions.ExecuteAsync(model, "Translation:Retranslate");
         Assert.Equal("compatible-secret", fixture.Jobs.TranslationCredential);
     }
 
@@ -124,7 +124,7 @@ public sealed class CredentialWorkflowTests
         fixture.Dialogs.Confirm = true; await model.ConfirmCompatibleAddressCommand.ExecuteAsync(null); Assert.True(model.CanTestEngine);
         model.TaskProviderIndex = 0; model.InputPath = "fixture.mp4"; Assert.False(model.CanRun);
         await model.SaveSettingsCommand.ExecuteAsync(null); Assert.True(model.CanRun);
-        await model.SaveCredentialsCommand.ExecuteAsync(null); model.LockCredentialsCommand.Execute(null);
+        await model.SaveCredentialsCommand.ExecuteAsync(null); await model.LockCredentialsCommand.ExecuteAsync(null);
         await model.ManageMasterPasswordCommand.ExecuteAsync(null); Assert.True(model.CanTestEngine);
     }
 
@@ -136,9 +136,9 @@ public sealed class CredentialWorkflowTests
         var run = model.RunCommand.ExecuteAsync(null); await fixture.Jobs.TranslationStarted.Task;
         Assert.False(model.LockCredentialsCommand.CanExecute(null)); Assert.False(model.SaveCredentialsCommand.CanExecute(null));
         Assert.False(model.ChangeMasterPasswordCommand.CanExecute(null)); Assert.False(model.ResetCredentialsCommand.CanExecute(null));
-        model.LockCredentialsCommand.Execute(null); Assert.True(model.IsUnlocked);
+        await model.LockCredentialsCommand.ExecuteAsync(null); Assert.True(model.IsUnlocked);
         fixture.Jobs.ReleaseTranslation.TrySetResult(); await run;
-        model.CueSelection.Clear(); model.CueSelection.Select(0); model.LockCredentialsCommand.Execute(null);
+        model.CueSelection.Clear(); model.CueSelection.Select(0); await model.LockCredentialsCommand.ExecuteAsync(null);
         Assert.True(model.CanExport); Assert.False(model.CanRetryCue); Assert.Equal(2, model.Rows.Count);
         fixture.Dialogs.SavePath = Path.Combine(fixture.Root, "locked-export.srt"); await model.ExportCommand.ExecuteAsync(null);
         Assert.Contains("中文译文", await File.ReadAllTextAsync(fixture.Dialogs.SavePath));
@@ -162,7 +162,7 @@ public sealed class CredentialWorkflowTests
     {
         using var fixture = new Fixture(); await using var model = fixture.Model();
         fixture.Dialogs.Confirm = false; await model.ResetCredentialsCommand.ExecuteAsync(null); Assert.True(model.HasMasterPassword);
-        await model.ChangeMasterPasswordCommand.ExecuteAsync(null); model.LockCredentialsCommand.Execute(null);
+        await model.ChangeMasterPasswordCommand.ExecuteAsync(null); await model.LockCredentialsCommand.ExecuteAsync(null);
         await model.ManageMasterPasswordCommand.ExecuteAsync(null); Assert.False(model.IsUnlocked);
         fixture.Dialogs.Password = fixture.Dialogs.NewPassword; await model.ManageMasterPasswordCommand.ExecuteAsync(null);
         Assert.True(model.IsUnlocked); Assert.Equal("fake-eleven", model.ElevenLabsKey);
@@ -178,8 +178,7 @@ public sealed class CredentialWorkflowTests
         using var fixture = new Fixture(); await using var model = new MainWindowViewModel(fixture.Jobs, fixture.Store, fixture.Dialogs);
         var window = new MainWindow { DataContext = model, Width = width, Height = height };
         window.Show(); await model.InitializeCommand.ExecuteAsync(null); model.Settings.Theme = theme; model.InputPath = "fixture.mp4";
-        var workspace = window.FindControl<WorkspaceView>("WorkspacePage")!;
-        Assert.False(workspace.FindControl<Button>("NextButton")!.IsEffectivelyEnabled);
+        Assert.True(model.IsProjects); Assert.True(model.CanManageProject); Assert.False(model.CanRun);
         await Capture(window, "凭证未设置");
         model.ShowSettingsCommand.Execute(null); await Capture(window, "密钥设置锁定");
         foreach (var purpose in Enum.GetValues<PasswordPurpose>())

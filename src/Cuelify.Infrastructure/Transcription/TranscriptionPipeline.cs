@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Cuelify.Core.Media;
+using Cuelify.Core.Projects;
 using Cuelify.Core.Speech;
 using Cuelify.Core.Subtitles;
 using Cuelify.Infrastructure.Media;
@@ -18,7 +19,7 @@ public sealed record TranscriptionOptions
     public TimeSpan MaximumRetryDelay { get; init; } = TimeSpan.FromSeconds(60);
 }
 
-public sealed record TranscriptionProgress(string Stage, int? ChunkIndex = null, int? TotalChunks = null);
+public sealed record TranscriptionProgress(string Stage, int? ChunkIndex = null, int? TotalChunks = null, ProcessingState? State = null);
 public sealed record TranscriptionResult(string JobId, TimeSpan Duration, IReadOnlyList<AudioChunk> Chunks,
     IReadOnlyList<WordToken> Words, IReadOnlyList<SubtitleCue> Cues, int AsrRequests, int CacheHits, string OutputPath);
 public sealed class TranscriptionFailedException(IReadOnlyList<int> failedChunks) : Exception(
@@ -29,7 +30,7 @@ public sealed class TranscriptionFailedException(IReadOnlyList<int> failedChunks
 }
 
 // 仅编排原文识别；翻译参数不会进入音频/VAD/ASR 缓存键。
-public sealed class TranscriptionPipeline(IAudioProcessor audioProcessor, IVoiceActivityDetector vad, IAsrClient asr,
+public sealed class TranscriptionPipeline(IAudioProcessor audioProcessor, IVoiceActivityDetector? vad, IAsrClient asr,
     string vadSignature, ElevenLabsAsrOptions asrOptions, string? cacheRoot = null, string asrCacheNamespace = "elevenlabs-scribe")
 {
     private readonly string _cacheRoot = cacheRoot ?? Path.Combine(
@@ -54,104 +55,73 @@ public sealed class TranscriptionPipeline(IAudioProcessor audioProcessor, IVoice
             throw new ArgumentException("仅支持 SRT 输出。");
         if (string.Equals(inputPath, outputPath, StringComparison.OrdinalIgnoreCase)) throw new ArgumentException("输出不能覆盖输入媒体。");
         if (!overwrite && File.Exists(outputPath)) throw new IOException("SRT 已存在，请明确选择覆盖或更换输出路径。");
-        // 从指纹计算至完成期间只允许其他读取者，防止媒体在识别过程中被改写。
-        await using var inputGuard = new FileStream(inputPath, FileMode.Open, FileAccess.Read, FileShare.Read);
-        var input = new FileInfo(inputPath);
-        var fingerprint = new { Path = inputPath, input.Length, ModifiedUtc = input.LastWriteTimeUtc,
-            Sha256 = await AtomicFile.HashFileAsync(inputPath, cancellationToken), FfmpegAudioProcessor.PreparationVersion };
-        var jobId = AtomicFile.Hash(fingerprint);
-        var directory = Path.Combine(_cacheRoot, jobId);
-        Directory.CreateDirectory(directory);
-        // 同一作业的多个窗口/进程不得同时发起相同付费请求。
-        await using var jobLock = new FileStream(Path.Combine(directory, "job.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+        var prepared = await new ChunkingPipeline(audioProcessor, vad ?? throw new InvalidOperationException("请先提供 VAD 检测器或使用已有分片。"), vadSignature, _cacheRoot).RunAsync(inputPath,
+            options.Chunks with { MaximumUploadBytes = Math.Min(options.Chunks.MaximumUploadBytes, asrOptions.MaximumUploadBytes) },
+            progress: progress, token: cancellationToken);
+        var result = await TranscribePreparedAsync(prepared, options, progress: progress, cancellationToken: cancellationToken);
+        var cues = new CueBuilder().Build(result.Words, options.Cues);
+        await AtomicFile.WriteTextAsync(outputPath, SrtSerializer.SerializeSource(cues), overwrite, cancellationToken);
+        result = result with { Cues = cues };
+        return result with { OutputPath = outputPath };
+    }
+
+    public async Task<TranscriptionResult> TranscribePreparedAsync(ChunkingResult prepared, TranscriptionOptions? options = null,
+        string? workDirectory = null, IReadOnlySet<int>? retryChunks = null, IProgress<TranscriptionProgress>? progress = null,
+        CancellationToken cancellationToken = default, bool reuseShared = true)
+    {
+        options ??= new(); asrOptions.Validate();
+        if (options.Concurrency is < 1 or > 8 || options.MaximumAttempts is < 1 or > 5) throw new ArgumentException("识别并发或重试次数无效。");
+        _ = new CueBuilder().Build([], options.Cues);
+        var jobId = prepared.JobId;
+        var directory = workDirectory ?? Path.Combine(_cacheRoot, jobId); Directory.CreateDirectory(directory);
+        await using var jobLock = new FileStream(Path.Combine(directory, "asr.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
         var statusPath = Path.Combine(directory, "status.json");
-        await AtomicFile.WriteJsonAsync(Path.Combine(directory, "input.json"), fingerprint, cancellationToken);
+        var chunks = prepared.Files.Select(f => f.Chunk).ToArray();
         int requests = 0, hits = 0;
         var failures = new ConcurrentDictionary<int, string>();
+        var transcripts = new ConcurrentDictionary<int, ChunkTranscript>();
         try
         {
-            await Status("AudioPreparing");
-            var pcmPath = Path.Combine(directory, "audio.pcm");
-            var preparation = await AtomicFile.ReadJsonAsync<AudioCache>(Path.Combine(directory, "audio.json"), cancellationToken);
-            PreparedAudio prepared;
-            if (preparation is not null && File.Exists(pcmPath) && new FileInfo(pcmPath).Length == preparation.Bytes &&
-                await AtomicFile.HashFileAsync(pcmPath, cancellationToken) == preparation.Sha256)
-                prepared = new(pcmPath, preparation.Duration);
-            else
-            {
-                var media = await audioProcessor.ProbeAsync(inputPath, cancellationToken);
-                prepared = await audioProcessor.PrepareAsync(inputPath, media, pcmPath, cancellationToken);
-                preparation = new(prepared.Duration, new FileInfo(pcmPath).Length, await AtomicFile.HashFileAsync(pcmPath, cancellationToken));
-                await AtomicFile.WriteJsonAsync(Path.Combine(directory, "audio.json"), preparation, cancellationToken);
-            }
-            var vadKey = AtomicFile.Hash(new { preparation!.Sha256, vadSignature });
-            var vadPath = Path.Combine(directory, $"vad-{vadKey}.json");
-            var detected = await AtomicFile.ReadJsonAsync<VadCache>(vadPath, cancellationToken);
-            if (detected is null)
-            {
-                await Status("VadAnalyzing");
-                await using var pcm = File.OpenRead(pcmPath);
-                detected = new(await vad.DetectAsync(pcm, cancellationToken));
-                await AtomicFile.WriteJsonAsync(vadPath, detected, cancellationToken);
-            }
-            await Status("ChunkPlanning");
-            var plannerOptions = options.Chunks with { MaximumUploadBytes = Math.Min(options.Chunks.MaximumUploadBytes, asrOptions.MaximumUploadBytes) };
-            IReadOnlyList<AudioChunk> chunks = [];
-            string chunkDirectory = "";
-            // 实际文件过大时缩短硬上限并重导出，绝不上传/重试同一个过大请求。
-            for (var round = 0; round < 4; round++)
-            {
-                chunks = new AudioChunkPlanner().Plan(prepared.Duration, detected.Regions, plannerOptions);
-                chunkDirectory = Path.Combine(directory, "chunks-" + AtomicFile.Hash(chunks));
-                Directory.CreateDirectory(chunkDirectory);
-                AudioChunk? oversized = null;
-                long oversizedBytes = 0;
-                foreach (var chunk in chunks)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    var path = ChunkPath(chunkDirectory, chunk.Index);
-                    // 派生 WAV 每次重导出；不信任未完成或被外部修改的旧文件。
-                    await audioProcessor.ExportChunkAsync(prepared, chunk, path, cancellationToken);
-                    var bytes = new FileInfo(path).Length;
-                    if (bytes == 0) throw new InvalidDataException($"分片 {chunk.Index} 文件为空。");
-                    if (bytes > plannerOptions.MaximumUploadBytes) { oversized = chunk; oversizedBytes = bytes; break; }
-                }
-                if (oversized is null) break;
-                if (round == 3) throw new InvalidDataException("缩短分片后仍超过实际上传大小上限，请检查音频编码配置。");
-                var shorter = TimeSpan.FromTicks((long)(oversized.Duration.Ticks * .8 * plannerOptions.MaximumUploadBytes / oversizedBytes));
-                plannerOptions = plannerOptions with { MaximumDuration = shorter };
-            }
-            await AtomicFile.WriteJsonAsync(Path.Combine(directory, "chunks.json"), chunks, cancellationToken);
             await Status("Transcribing");
             using var concurrency = new SemaphoreSlim(options.Concurrency);
-            var transcripts = new ConcurrentDictionary<int, ChunkTranscript>();
             await Task.WhenAll(chunks.Select(async chunk =>
             {
                 await concurrency.WaitAsync(cancellationToken);
                 try
                 {
-                    progress?.Report(new("Transcribing", chunk.Index, chunks.Count));
-                    var cacheKey = AtomicFile.Hash(new { preparation.Sha256, chunk.Start, chunk.End, asrCacheNamespace,
+                    progress?.Report(new("Transcribing", chunk.Index, chunks.Length));
+                    var cacheKey = AtomicFile.Hash(new { Sha256 = prepared.AudioSha256, chunk.Start, chunk.End, asrCacheNamespace,
                         asrOptions.ModelId, asrOptions.LanguageCode, asrOptions.FileFormat, Protocol = "scribe-words-v1" });
                     var path = Path.Combine(directory, $"asr-{cacheKey}.json");
                     var cached = await AtomicFile.ReadJsonAsync<AsrTranscript>(path, cancellationToken);
+                    if (cached is null && reuseShared && workDirectory is not null)
+                        cached = await AtomicFile.ReadJsonAsync<AsrTranscript>(Path.Combine(_cacheRoot, jobId, $"asr-{cacheKey}.json"), cancellationToken);
                     if (cached is not null)
                     {
                         _ = WordTimelineMerger.ToGlobal(new(chunk, cached));
+                        await AtomicFile.WriteJsonAsync(path, cached, CancellationToken.None);
                         transcripts[chunk.Index] = new(chunk, cached);
                         Interlocked.Increment(ref hits);
+                        progress?.Report(new("Transcribing", chunk.Index, chunks.Length, ProcessingState.Completed));
                         return;
                     }
+                    if (retryChunks is not null && !retryChunks.Contains(chunk.Index))
+                    { failures[chunk.Index] = "本次未选择该未完成分片"; progress?.Report(new("Transcribing", chunk.Index, chunks.Length, ProcessingState.NotStarted)); return; }
+                    var file = prepared.Files.Single(f => f.Chunk.Index == chunk.Index);
+                    if (!await ChunkingPipeline.ValidAsync(file, cancellationToken))
+                        throw new InvalidDataException($"分片 {chunk.Index + 1} 文件缺失或校验失败，请重新分片。");
+                    progress?.Report(new("Transcribing", chunk.Index, chunks.Length, ProcessingState.Running));
                     for (var attempt = 1; attempt <= options.MaximumAttempts; attempt++)
                     {
                         try
                         {
                             Interlocked.Increment(ref requests);
-                            var transcript = await asr.TranscribeAsync(ChunkPath(chunkDirectory, chunk.Index), cancellationToken);
+                            var transcript = await asr.TranscribeAsync(file.Path, cancellationToken);
                             _ = WordTimelineMerger.ToGlobal(new(chunk, transcript));
                             // 已收齐且通过校验的付费结果，即使此时用户取消，也先原子保存。
                             await AtomicFile.WriteJsonAsync(path, transcript, CancellationToken.None);
                             transcripts[chunk.Index] = new(chunk, transcript);
+                            progress?.Report(new("Transcribing", chunk.Index, chunks.Length, ProcessingState.Completed));
                             return;
                         }
                         catch (Exception exception) when (CanRetry(exception, cancellationToken) && attempt < options.MaximumAttempts)
@@ -160,31 +130,34 @@ public sealed class TranscriptionPipeline(IAudioProcessor audioProcessor, IVoice
                                 options.InitialRetryDelay.Ticks * Math.Pow(2, attempt - 1)));
                             if (exception is AsrServiceException { RetryAfter: { } retryAfter } && retryAfter > delay) delay = retryAfter;
                             if (delay > options.MaximumRetryDelay) throw; // 不违背服务 Retry-After 提前重试。
-                            progress?.Report(new("RetryWaiting", chunk.Index, chunks.Count));
+                            progress?.Report(new("RetryWaiting", chunk.Index, chunks.Length));
                             await Task.Delay(delay, cancellationToken);
                         }
                     }
                 }
-                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
-                catch (Exception exception) { failures[chunk.Index] = FailureCategory(exception); }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                { progress?.Report(new("Transcribing", chunk.Index, chunks.Length, ProcessingState.Cancelled)); throw; }
+                catch (Exception exception)
+                { failures[chunk.Index] = FailureCategory(exception); progress?.Report(new("Transcribing", chunk.Index, chunks.Length, ProcessingState.Failed)); }
                 finally { concurrency.Release(); }
             }));
             if (!failures.IsEmpty) throw new TranscriptionFailedException(failures.Keys.Order().ToArray()) { Categories = new Dictionary<int, string>(failures) };
             cancellationToken.ThrowIfCancellationRequested();
-            await Status("BuildingCues");
             var words = new WordTimelineMerger().Merge(transcripts.Values.ToArray());
-            var cues = new CueBuilder().Build(words, options.Cues);
             await AtomicFile.WriteJsonAsync(Path.Combine(directory, "words.json"), words, cancellationToken);
-            await AtomicFile.WriteJsonAsync(Path.Combine(directory, "cues.json"), cues, cancellationToken);
-            await Status("Exporting");
-            await AtomicFile.WriteTextAsync(outputPath, SrtSerializer.SerializeSource(cues), overwrite, cancellationToken);
-            var result = new TranscriptionResult(jobId, prepared.Duration, chunks, words, cues, requests, hits, outputPath);
+            var result = new TranscriptionResult(jobId, prepared.Duration, chunks, words, [], requests, hits, "");
             await AtomicFile.WriteJsonAsync(Path.Combine(directory, "result.json"), result, CancellationToken.None);
             await Status("Completed");
             return result;
         }
         catch (Exception exception)
         {
+            if (!transcripts.IsEmpty)
+            {
+                var partialWords = new WordTimelineMerger().Merge(transcripts.Values.ToArray());
+                await AtomicFile.WriteJsonAsync(Path.Combine(directory, "result.json"), new TranscriptionResult(jobId, prepared.Duration,
+                    chunks, partialWords, [], requests, hits, ""), CancellationToken.None);
+            }
             await AtomicFile.WriteJsonAsync(statusPath, new { Stage = cancellationToken.IsCancellationRequested ? "Cancelled" : "Failed",
                 Category = FailureCategory(exception), FailedChunks = failures.OrderBy(item => item.Key).ToArray(), AsrRequests = requests, CacheHits = hits }, CancellationToken.None);
             throw;
@@ -197,7 +170,6 @@ public sealed class TranscriptionPipeline(IAudioProcessor audioProcessor, IVoice
         }
     }
 
-    private static string ChunkPath(string directory, int index) => Path.Combine(directory, $"chunk-{index:000000}.wav");
     private static bool CanRetry(Exception exception, CancellationToken token) => !token.IsCancellationRequested &&
         (exception is AsrServiceException { IsTransient: true } or HttpRequestException or TimeoutException or OperationCanceledException);
     private static string FailureCategory(Exception exception) => exception switch
@@ -208,6 +180,4 @@ public sealed class TranscriptionPipeline(IAudioProcessor audioProcessor, IVoice
         TimeoutException => "超时", HttpRequestException => "网络失败", IOException => "文件或外部命令失败",
         TranscriptionFailedException => "部分 ASR 分片失败", InvalidOperationException => "会话凭据或处理状态无效", _ => "配置或处理失败"
     };
-    private sealed record AudioCache(TimeSpan Duration, long Bytes, string Sha256);
-    private sealed record VadCache(IReadOnlyList<SpeechRegion> Regions);
 }

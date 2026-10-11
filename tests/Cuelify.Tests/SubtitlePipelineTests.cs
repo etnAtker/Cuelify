@@ -2,6 +2,7 @@ using System.Text.Json;
 using Cuelify.Core.Speech;
 using Cuelify.Core.Subtitles;
 using Cuelify.Core.Translation;
+using Cuelify.Core.Projects;
 using Cuelify.Infrastructure.Translation;
 using Xunit;
 
@@ -30,30 +31,29 @@ public sealed class SubtitlePipelineTests
     {
         WordToken[] words = [new("你好", TimeSpan.Zero, TimeSpan.FromSeconds(1), null), new("。", TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1), null),
             new("嗯。", TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2.1), null)];
-        var segments = new (SourceWordRange, string?)[] { (new(0, 1), "你好"), (new(2, 2), "嗯") };
+        SourceWordRange[] segments = [new(0, 1), new(2, 2)];
         var (cues, ranges) = PipelineDisplay.Build(words, segments, SubtitlePipelinePresets.TwoStage, TimeSpan.FromSeconds(4));
         Assert.Equal("你好。嗯。", string.Concat(cues.Select(c => c.SourceText)));
         Assert.Equal(new SourceWordRange(0, 1), ranges[0]); Assert.Equal(TimeSpan.FromSeconds(2.7), cues[1].End);
         Assert.True(cues[0].End <= cues[1].Start); Assert.Equal(TimeSpan.FromSeconds(2.1), words[^1].End);
-        _ = SrtSerializer.SerializeTranslated(cues);
+        _ = SrtSerializer.SerializeSource(cues);
     }
 
     [Theory]
-    [InlineData(SubtitlePipelineMode.SegmentThenTranslate)]
-    [InlineData(SubtitlePipelineMode.JointSegmentationTranslation)]
-    public async Task StagesResumeFromValidatedCacheAndRenameDoesNotRegenerate(SubtitlePipelineMode mode)
+    [InlineData(SegmentationMethod.Model)]
+    public async Task StagesResumeFromValidatedCacheAndRenameDoesNotRegenerate(SegmentationMethod mode)
     {
         var root = Path.Combine(Path.GetTempPath(), "Cuelify-pipeline-" + Guid.NewGuid().ToString("N"));
         try
         {
-            var pipe = SubtitlePipelinePresets.TwoStage with { Mode = mode };
-            var words = Words(); var engine = new Engine(mode);
+            var pipe = SubtitlePipelinePresets.TwoStage with { Method = mode };
+            var words = Words(); var engine = new Engine();
             var service = new SubtitlePipelineOrchestrator(engine, root);
             var first = await service.GenerateAsync(words, [], TimeSpan.FromSeconds(48), pipe, new());
             Assert.Equal(2, first.EngineCalls); Assert.Equal(8, first.Cues.Count);
             Assert.Equal(string.Concat(words.Select(w => w.Text)), string.Concat(first.Cues.Select(c => c.SourceText)));
             Assert.Equal(new SourceWordRange(0, 0), first.Ranges[0]);
-            Assert.All(first.Cues, c => Assert.Equal(mode == SubtitlePipelineMode.JointSegmentationTranslation, c.TranslatedText is not null));
+            Assert.All(first.Cues, c => Assert.Null(c.TranslatedText));
             var second = await service.GenerateAsync(words, [], TimeSpan.FromSeconds(48), pipe with { Name = "改名", Id = "new-id", Description = "备注" }, new());
             Assert.Equal(0, second.EngineCalls); Assert.Equal(2, second.CacheHits);
             var changed = await service.GenerateAsync(words, [], TimeSpan.FromSeconds(48), pipe with
@@ -66,10 +66,10 @@ public sealed class SubtitlePipelineTests
     [Fact]
     public async Task DirectTranslationDoesNotAskModelToGenerateBoundaries()
     {
-        var engine = new Engine(SubtitlePipelineMode.DirectTranslation);
+        var engine = new Engine();
         SubtitleCue[] cues = [new("old", TimeSpan.Zero, TimeSpan.FromSeconds(1), "Hello.")];
         var result = await new SubtitlePipelineOrchestrator(engine, "unused").GenerateAsync(Words(), cues, TimeSpan.FromSeconds(48), SubtitlePipelinePresets.Direct, new());
-        Assert.Same(cues, result.Cues); Assert.Null(engine.LastRequest); Assert.Equal(0, result.EngineCalls);
+        result.ValidateSource(8); Assert.All(result.Cues, cue => Assert.Null(cue.TranslatedText)); Assert.Null(engine.LastRequest); Assert.Equal(0, result.EngineCalls);
     }
 
     [Fact]
@@ -80,7 +80,7 @@ public sealed class SubtitlePipelineTests
         try
         {
             var pipe = SubtitlePipelinePresets.TwoStage with { BlockSeconds = 5 };
-            var engine = new Engine(pipe.Mode) { CancelOnCall = 2, Cancellation = cancel };
+            var engine = new Engine() { CancelOnCall = 2, Cancellation = cancel };
             var service = new SubtitlePipelineOrchestrator(engine, root);
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.GenerateAsync(Words(4), [], TimeSpan.FromSeconds(24), pipe, new() { Concurrency = 1 }, token: cancel.Token));
             engine.CancelOnCall = 0;
@@ -131,14 +131,14 @@ public sealed class SubtitlePipelineTests
     }
 
     [Fact]
-    public void SpeakerChangesAndLongSilenceAreMandatoryEvenWithoutPunctuation()
+    public void SpeakerChangesAndLongSilenceDoNotForceModelBoundaries()
     {
         WordToken[] words = [new("你好", TimeSpan.Zero, TimeSpan.FromSeconds(1), "a"), new("是的", TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(2), "b"),
             new("再见", TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(6), "b")];
         var profile = SubtitlePipelinePresets.TwoStage;
         var block = PipelinePromptBuilder.Plan(words, profile)[0];
         Assert.Equal(3, PipelinePromptBuilder.Parse("{\"ends\":[0,1,2]}", words, block, profile).Count);
-        Assert.Throws<InvalidDataException>(() => PipelinePromptBuilder.Parse("{\"ends\":[2]}", words, block, profile));
+        Assert.Single(PipelinePromptBuilder.Parse("{\"ends\":[2]}", words, block, profile));
     }
 
     private sealed class CorrectingEngine : ITranslationEngine
@@ -177,22 +177,46 @@ public sealed class SubtitlePipelineTests
         public Task<TranslationResponse> TranslateAsync(TranslationRequest request, CancellationToken cancellationToken)
         { Requests.Add(request); return Task.FromResult(new TranslationResponse("新译文")); }
     }
-    private sealed class Engine(SubtitlePipelineMode mode) : ITranslationEngine
+    [Fact]
+    public async Task FailedBlockRetryReusesSuccessAndRecordsRetryAfterLimitFailure()
+    {
+        using var directory = new TestDirectory();
+        var pipe = SubtitlePipelinePresets.TwoStage with { BlockSeconds = 5 };
+        var engine = new Engine() { FailureOnCall = 2 };
+        var service = new SubtitlePipelineOrchestrator(engine, directory.Path);
+        var settings = new TranslationSettings { Concurrency = 1, MaximumAttempts = 2, RetryDelay = TimeSpan.Zero, MaximumRetryDelay = TimeSpan.Zero };
+        var states = new Dictionary<string, ProcessingState>();
+        var progress = new ProgressSink(value => { foreach (var unit in value.UnitStates ?? new Dictionary<string, ProcessingState>()) states[unit.Key] = unit.Value; });
+        await Assert.ThrowsAsync<TranslationServiceException>(() => service.GenerateAsync(Words(4), [], TimeSpan.FromSeconds(24), pipe, settings, progress));
+        Assert.Equal(4, states.Count); Assert.Equal(2, states.Values.Count(s => s == ProcessingState.NotStarted));
+        Assert.Single(states.Values, s => s == ProcessingState.Completed); Assert.Single(states.Values, s => s == ProcessingState.Failed);
+        var failed = Assert.Single(Directory.GetFiles(directory.Path, "*.failed", SearchOption.AllDirectories));
+        engine.FailureOnCall = 0;
+        // 尚未开始的块不能被算为失败重试；先复用成功块，只请求失败块。
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.GenerateAsync(Words(4), [], TimeSpan.FromSeconds(24), pipe, settings,
+            retryBlocks: new HashSet<string> { Path.GetFileName(failed)[..^7] }));
+        Assert.Equal(3, engine.Calls); Assert.False(File.Exists(failed));
+        var completed = await service.GenerateAsync(Words(4), [], TimeSpan.FromSeconds(24), pipe, settings, progress);
+        Assert.Equal(2, completed.CacheHits); Assert.Equal(2, completed.EngineCalls);
+        Assert.All(states.Values, s => Assert.Equal(ProcessingState.Completed, s));
+    }
+    private sealed class ProgressSink(Action<TranslationProgress> report) : IProgress<TranslationProgress>
+    { public void Report(TranslationProgress value) => report(value); }
+    private sealed class Engine : ITranslationEngine
     {
         public string CacheIdentity => "pipeline-fixture";
         public TranslationRequest? LastRequest;
-        public int CancelOnCall, Calls;
+        public int CancelOnCall, FailureOnCall, Calls;
         public CancellationTokenSource? Cancellation;
         public Task<TranslationResponse> TranslateAsync(TranslationRequest request, CancellationToken cancellationToken)
         {
             if (++Calls == CancelOnCall) { Cancellation!.Cancel(); throw new OperationCanceledException(cancellationToken); }
-            LastRequest = request; Assert.NotNull(request.Grammar);
+            if (Calls == FailureOnCall) throw new TranslationServiceException(System.Net.HttpStatusCode.TooManyRequests, TimeSpan.FromSeconds(10));
+            LastRequest = request; Assert.NotNull(request.OutputContract);
             var text = request.Messages.Last().Content;
             using var json = JsonDocument.Parse(text[(text.LastIndexOf("待处理词：", StringComparison.Ordinal) + 5)..]);
             var ids = json.RootElement.EnumerateArray().Select(w => w.GetProperty("id").GetInt32()).ToArray();
-            return Task.FromResult(new TranslationResponse(mode == SubtitlePipelineMode.JointSegmentationTranslation
-                ? JsonSerializer.Serialize(new { segments = ids.Select(id => new { end = id, text = "测试译文" }) })
-                : JsonSerializer.Serialize(new { ends = ids })));
+            return Task.FromResult(new TranslationResponse(JsonSerializer.Serialize(new { ends = ids })));
         }
     }
 }

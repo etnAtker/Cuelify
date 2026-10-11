@@ -152,7 +152,7 @@ public sealed class LocalServerTests
     [Fact]
     public async Task StageSamplingGrammarAndTokenBudgetReachLocalCompletion()
     {
-        var stage = Request() with { Parameters = new() { Temperature = 0, TopP = 1, TopK = 40, RepeatPenalty = 1, MaximumTokens = 200 }, Grammar = "root ::= \"{}\"" };
+        var stage = Request() with { Parameters = new() { Temperature = 0, TopP = 1, TopK = 40, RepeatPenalty = 1, MaximumTokens = 200 }, OutputContract = new() { Kind = GenerationOutputKind.Translation, CueIds = ["a"], Format = TranslationOutputFormat.CueIdJson, MaximumTextCharacters = 44 } };
         using var http = new HttpClient(new Handler(async request =>
         {
             using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
@@ -161,12 +161,16 @@ public sealed class LocalServerTests
             Assert.Equal(40, body.RootElement.GetProperty("top_k").GetInt32());
             Assert.Equal(1, body.RootElement.GetProperty("repeat_penalty").GetDouble());
             Assert.Equal(200, body.RootElement.GetProperty("n_predict").GetInt32());
-            Assert.Equal(stage.Grammar, body.RootElement.GetProperty("grammar").GetString());
+            Assert.Equal(OutputGrammarCompiler.Compile(stage.OutputContract!), body.RootElement.GetProperty("grammar").GetString());
             return new(HttpStatusCode.OK) { Content = new StringContent("data: {\"content\":\"{}\",\"stop\":true,\"stop_type\":\"eos\",\"tokens_predicted\":1,\"truncated\":false}\n\n", Encoding.UTF8, "text/event-stream") };
         })) { BaseAddress = new("http://127.0.0.1/") };
         var protocol = new LlamaServerProtocol(http, 512, 100);
         Assert.Equal("{}", (await protocol.CompleteAsync("prepared", null, default, stage)).Content);
-        await Assert.ThrowsAsync<ArgumentException>(() => protocol.PrepareAsync(stage with { Parameters = new() { MaximumTokens = 300 } }, default));
+        using var preparedHttp = new HttpClient(new Handler(request => Task.FromResult(request.RequestUri!.AbsolutePath == "/apply-template"
+            ? Json(new { prompt = "prepared" }) : Json(new { tokens = new[] { 1, 2, 3 } })))) { BaseAddress = new("http://127.0.0.1/") };
+        var capacity = new LlamaServerProtocol(preparedHttp, 512, 100);
+        Assert.Equal(3, (await capacity.PrepareAsync(stage with { Parameters = new() { MaximumTokens = 300 } }, default)).Tokens);
+        await Assert.ThrowsAsync<PromptCapacityException>(() => capacity.PrepareAsync(stage with { Parameters = new() { MaximumTokens = 510 } }, default));
     }
 
     [Fact]
@@ -183,6 +187,8 @@ public sealed class LocalServerTests
     { protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token) => send(request); }
     private sealed class Session : ILlamaServerSession
     {
+        public Task<LocalCompletion> CompleteAsync(string prompt, TranslationRequest request, IProgress<int>? progress, CancellationToken token)
+            => CompleteAsync(prompt, progress, token);
         public VulkanEvidence? Evidence => null;
         public bool Hold; public bool Disposed; public int Calls; public int Active; public int MaximumActive;
         public LocalCompletion Result = new("你好。", 3, "eos", false);

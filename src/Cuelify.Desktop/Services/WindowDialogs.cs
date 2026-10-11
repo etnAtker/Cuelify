@@ -12,6 +12,8 @@ public enum PromptSwitchChoice { Cancel, Save, Discard }
 public interface IWindowDialogs
 {
     Task<string?> OpenAsync(string title, string[] patterns);
+    async Task<IReadOnlyList<string>> OpenMediaAsync(string title, string[] patterns)
+    { var path = await OpenAsync(title, patterns); return path is null ? [] : [path]; }
     Task<string?> SaveSrtAsync(string suggestedName);
     Task<bool> ConfirmAsync(string message, CancellationToken token = default);
     Task<PromptSwitchChoice> ConfirmPromptSwitchAsync(string templateName);
@@ -47,6 +49,18 @@ public sealed class WindowDialogs(Window owner) : IWindowDialogs
         if (files.Count == 0) return null;
         using var file = files[0];
         return file.TryGetLocalPath() ?? throw new InvalidOperationException("请选择本地文件。");
+    }
+    public async Task<IReadOnlyList<string>> OpenMediaAsync(string title, string[] patterns)
+    {
+        if (!owner.StorageProvider.CanOpen) throw new InvalidOperationException("文件选择器不可用。");
+        var files = await owner.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        { Title = title, AllowMultiple = true, FileTypeFilter = [new("音视频") { Patterns = patterns }, FilePickerFileTypes.All] });
+        var paths = new List<string>();
+        foreach (var file in files)
+        {
+            using (file) paths.Add(file.TryGetLocalPath() ?? throw new InvalidOperationException("请选择本地文件。"));
+        }
+        return paths;
     }
     public async Task<string?> SaveSrtAsync(string suggestedName)
     {

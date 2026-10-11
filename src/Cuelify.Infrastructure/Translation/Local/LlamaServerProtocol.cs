@@ -24,7 +24,6 @@ public sealed class LlamaServerProtocol(HttpClient http, uint contextSize, int m
     {
         request.Parameters.Validate();
         var budget = request.Parameters.MaximumTokens ?? maximumTokens;
-        if (budget > contextSize / 2) throw new ArgumentException("阶段最大输出长度超过本地上下文的一半，请调整管线或模型上下文容量。");
         return EmbeddedPromptBudget.PrepareAsync(request, RenderAsync, contextSize, budget, token);
     }
 
@@ -56,7 +55,7 @@ public sealed class LlamaServerProtocol(HttpClient http, uint contextSize, int m
             ["repeat_last_n"] = 64, ["min_p"] = 0, ["seed"] = 42,
             ["samplers"] = new[] { "penalties", "top_k", "top_p", "temperature" }, ["cache_prompt"] = false
         };
-        if (stageRequest?.Grammar is { } grammar) body["grammar"] = grammar;
+        if (stageRequest?.OutputContract is { } contract) body["grammar"] = OutputGrammarCompiler.Compile(contract);
         using var request = new HttpRequestMessage(HttpMethod.Post, "completion")
         {
             Content = JsonContent.Create(body)

@@ -1,0 +1,9 @@
+<UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:vm="using:Cuelify.Desktop.ViewModels" x:Class="Cuelify.Desktop.Views.ProjectsView" x:DataType="vm:MainWindowViewModel">
+  <Grid RowDefinitions="Auto,Auto,*" Margin="32,24">
+    <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,20"><TextBlock Classes="title" Text="项目" /><Button Grid.Column="1" Content="新建项目…" Command="{Binding Workspace.NewProjectCommand}" IsEnabled="{Binding CanManageProject}" Classes="accent" /></Grid>
+    <ListBox Grid.Row="2" ItemsSource="{Binding Workspace.ProjectItems}" IsVisible="{Binding Workspace.HasProjects}" AutomationProperties.Name="项目列表">
+      <ListBox.ItemTemplate><DataTemplate x:DataType="vm:ProjectListItem"><Grid ColumnDefinitions="*,Auto" Margin="8,12"><StackPanel Spacing="8"><TextBlock Text="{Binding Name}" FontSize="18" FontWeight="SemiBold" /><TextBlock Text="{Binding Summary}" Classes="muted" /><TextBlock Text="{Binding Updated}" Classes="muted" FontSize="12" /></StackPanel><Button Grid.Column="1" Content="打开项目" VerticalAlignment="Center" Command="{Binding $parent[UserControl].((vm:MainWindowViewModel)DataContext).Workspace.OpenProjectCommand}" CommandParameter="{Binding}" /></Grid></DataTemplate></ListBox.ItemTemplate>
+    </ListBox>
+    <StackPanel Grid.Row="2" IsVisible="{Binding !Workspace.HasProjects}" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="16"><TextBlock Text="从一个项目开始" FontSize="24" FontWeight="SemiBold" /><TextBlock Text="把需要生成字幕的音视频放在同一个项目中。" Classes="muted" /><Button Content="新建项目…" Command="{Binding Workspace.NewProjectCommand}" IsEnabled="{Binding CanManageProject}" Classes="accent" HorizontalAlignment="Center" /></StackPanel>
+  </Grid>
+</UserControl>

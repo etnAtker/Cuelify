@@ -54,6 +54,25 @@ public sealed class TranslationOrchestratorTests
     private static TranslationOrchestrator Orchestrator(TestDirectory directory, Engine engine) => new(engine, directory.File("translation-cache"));
 
     [Fact]
+    public async Task TaskForcedRetranslationDoesNotModifySharedOrOtherTaskCaches()
+    {
+        using var directory = new TestDirectory();
+        var shared = directory.File("shared"); var engine = new Engine();
+        var original = await new TranslationOrchestrator(engine, shared).TranslateAsync(Cues, PromptPresets.BatchSubtitles, Settings);
+        var sharedFiles = Directory.GetFiles(shared, "*.json", SearchOption.AllDirectories).ToDictionary(path => path, File.ReadAllText);
+        var first = new TranslationOrchestrator(engine, directory.File("first"), shared);
+        var reused = await first.TranslateAsync(Cues, PromptPresets.BatchSubtitles, Settings);
+        Assert.Equal(0, reused.EngineCalls);
+        engine.Behavior = (request, _, _) => Task.FromResult(new TranslationResponse(JsonSerializer.Serialize(request.Cues.ToDictionary(c => c.Id, _ => "新的译文"))));
+        var changed = await first.TranslateAsync(Cues, PromptPresets.BatchSubtitles, Settings, new HashSet<string> { "a" }, previousCues: reused.Cues);
+        Assert.Equal("新的译文", changed.Cues[0].TranslatedText);
+        Assert.Equal(original.Cues[1].TranslatedText, changed.Cues[1].TranslatedText);
+        foreach (var (path, content) in sharedFiles) Assert.Equal(content, await File.ReadAllTextAsync(path));
+        var second = await new TranslationOrchestrator(engine, directory.File("second"), shared).TranslateAsync(Cues, PromptPresets.BatchSubtitles, Settings);
+        Assert.Equal(0, second.EngineCalls); Assert.Equal(original.Cues, second.Cues);
+    }
+
+    [Fact]
     public async Task FailedHttpRequestsKeepSafeReasonsForTheDesktop()
     {
         using var directory = new TestDirectory();

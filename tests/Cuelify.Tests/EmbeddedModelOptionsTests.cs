@@ -14,9 +14,12 @@ public sealed class EmbeddedModelOptionsTests
     [Theory]
     [InlineData(128, 64)]
     [InlineData(2048, 0)]
-    [InlineData(2048, 2048)]
     public void RejectsInvalidContextOrOutputBudget(uint contextSize, int maximumTokens) =>
         Assert.Throws<ArgumentException>(() => new EmbeddedModelOptions { ContextSize = contextSize, MaximumTokens = maximumTokens }.Validate());
+
+    [Fact]
+    public void OutputBudgetIsNotRestrictedToHalfTheContext() =>
+        new EmbeddedModelOptions { ContextSize = 2048, MaximumTokens = 1536 }.Validate();
 
     [Theory]
     [InlineData(0)]

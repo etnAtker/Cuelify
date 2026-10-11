@@ -14,17 +14,18 @@ Core 定义领域模型、接口和纯逻辑，不引用 Avalonia 或 Infrastruc
 
 | 模块 | 主要入口与职责 |
 | --- | --- |
+| `Core/Projects` | `ProjectDocument`、`MediaTaskDocument`、`StageRecord`：项目成员、阶段状态与版本依赖 |
 | `Core/Media` | `ICommandRunner`、`IAudioProcessor`、`AudioChunkPlanner`：媒体契约及切点规划 |
 | `Core/Speech` | 词与语音模型、`WordTimelineMerger`：局部时间转换及重叠去重 |
 | `Core/Subtitles` | `CueBuilder`、`SrtSerializer`：分句、源文/严格译文序列化 |
 | `Core/Translation` | `SubtitlePipelineProfile`、`PipelinePromptBuilder`、`PipelineDisplay`、`PromptBuilder`、`AlignmentValidator`：管线、词范围、显示与输出协议 |
 | `Infrastructure/Media` | `ProcessCommandRunner`、`FfmpegAudioProcessor`：文本/二进制管道、音频准备和片段导出 |
 | `Infrastructure/Speech` | Silero ONNX、ElevenLabs 客户端和词响应解析 |
-| `Infrastructure/Transcription` | `TranscriptionPipeline`：识别缓存、分片并发、重试与原始 cue |
+| `Infrastructure/Transcription` | `ChunkingPipeline`：PCM/VAD/分片与实际 WAV 校验；`TranscriptionPipeline`：独立消费分片、识别缓存、分片并发与原始词/cue |
 | `Infrastructure/Translation` | 云端 transport/provider、`SubtitlePipelineOrchestrator`、`TranslationOrchestrator`：阶段缓存与补译 |
 | `Infrastructure/Translation/Local` | 预置模型目录、动态官方下载与校验、Vulkan 运行时、GPU 证据、采样与推理 |
-| `Infrastructure/Storage` | `AtomicFile`：哈希、原子 JSON/文本读写；`CredentialStore`：跨平台主密码加密凭证 |
-| `Desktop/Services` | `AppSettings`、`ConfigurationStore`、`DesktopJobService`、`WindowDialogs`、`UserErrorMessages` |
+| `Infrastructure/Storage` | `ProjectStore`：项目目录/清单扫描、任务恢复、路径边界与排他锁；`AtomicFile`：哈希、原子 JSON/文本读写；`CredentialStore`：跨平台主密码加密凭证 |
+| `Desktop/Services` | `AppSettings`、`ConfigurationStore`、`ProjectTaskService`、`DesktopJobService`、`WindowDialogs`、`UserErrorMessages` |
 | `Desktop/ViewModels` | `MainWindowViewModel`：任务所有权、导航、步骤、命令与 UI 状态 |
 | `Desktop/Views`、`Desktop/Design` | 窗口外壳、三个页面、语义 tokens、样式与共享矢量图标 |
 
@@ -38,26 +39,26 @@ Core 定义领域模型、接口和纯逻辑，不引用 Avalonia 或 Infrastruc
          → 16 kHz 单声道 PCM → Silero VAD 或缓存
          → 静音优先分片 → 检查实际 WAV 大小
          → ElevenLabs 分片识别或缓存
-         → 全局词时间/边界去重 → CueBuilder → 原文 cue
+         → 全局词时间/边界去重 → 原始词结果
 ```
 
-工作台的“下一步”只调用 Probe，不开始 VAD、ASR 或翻译。正式运行由 `DesktopJobService` 构造音频、VAD 和 ASR 适配器，复用 `TranscriptionPipeline`。VAD 签名包含模型哈希及检测参数；API Key 不参与缓存身份。
+添加媒体只调用 Probe，不开始 VAD、ASR 或翻译。项目执行由 ProjectTaskService 按 TaskStagePlan 调用 DesktopJobService：ChunkingPipeline 生成持久化 ChunkingResult，TranscriptionPipeline.TranscribePreparedAsync 独立消费它。ASR 重试不加载 VAD、不再次导出有效 WAV，也不要求原媒体仍存在。旧 RunAsync 组合接口保留兼容；VAD 签名包含模型哈希及参数，API Key 不参与缓存身份。
 
 流水线对输入持有只读共享文件句柄，并用完整路径、长度、修改时间、内容 SHA-256 和准备版本建立指纹。音频缓存校验大小与哈希；VAD、分片和 ASR 参数参与各自缓存校验，成功分片单独保存。实际上传过大时有限缩短分片并重新导出，不重复上传同一过大文件。
 
-词响应还原全局时间并按文本/时间去重，保留原始 Words。`CueBuilder` 提供直接翻译的 cue 与识别中间显示；语义管线使用 Words 重新生成最终 cue。Desktop 清除临时原文 SRT，保留识别缓存，用户只导出严格译文 SRT。
+词响应还原全局时间并去重，原始 Words 作为识别词中间结果，项目 ASR 不生成字幕。CueBuilder.BuildWithRanges 在独立程序分句步骤生成 cue 和连续词范围；模型分句生成同构 SubtitlePipelineResult。ValidateSource 验证 cue/range 对齐与连续完整覆盖。用户只导出严格译文 SRT。
 
 词解析和全局时间转换接受起止时间相同的词；原始词缓存不加人工时长。`CueBuilderOptions.ZeroDurationTolerance` 控制零时长文本的相邻合并及孤立字幕显示时长，默认 500 毫秒，桌面保存为 `ZeroDurationToleranceMs`。改变该值重新组装 cue，复用 ASR 分片缓存；翻译缓存仍由新 cue 内容和时间确定。
 
 ## 字幕管线
 
-`SubtitlePipelineOrchestrator` 在翻译前运行独立的管线：直接翻译返回原 cue；两步流程从词 ID 选择末词，再调用既有翻译编排；联合流程同时输出末词 ID 和译文，全部有效时无需第二次翻译请求。第一版每个阶段使用任务选定的同一模型。
+TaskStagePlan 固定分片→识别词→分句→结果，与分句方法、模型及提供商无关。ProgramSegmentation 复用 CueBuilder，并保留零时长词处理；SubtitlePipelineOrchestrator 只执行模型分句。两者均输出纯原文 SubtitlePipelineResult（Cues/Ranges），结果步骤只读取该结果并调用 TranslationOrchestrator；移除所有从 ASR 直接联合生成结果的执行分支。
 
-`PipelinePromptBuilder` 先生成标点、说话人变化、长静音和长句停顿候选，再反向验证完整覆盖路径。模型不能创建任意时间或丢词；短逗号片段合并，最长时间及强制说话人/静音边界由程序控制。没有合法路径则明确报错，不强切词。请求附连贯原文、词表、起点到合法末词的映射及只供参考的前后文；云端验收失败的有限重试附具体校验原因。本地 GBNF 限定合法词路径，翻译步骤另限定批量 ID 与字符串长度。
+`PipelinePromptBuilder` 按原词时间分块，各起点允许所有满足最长字幕时间的末词 ID。没有标点白名单、日语助词、首词字符、逗号时长、说话人或固定停顿阈值的硬筛选。请求附连贯原文、词表、紧凑末词范围及参考前后文。每个分块保存 GenerationOutputContract，编排复用契约、请求及单元身份，ParseRanges 验收完整合法范围；本地 OutputGrammarCompiler 编译该契约为 GBNF，Core 不携带 grammar 字符串。翻译契约包含格式、固定 ID 和长度，Align 复用 AlignmentValidator 保留有效部分。云端返回后使用相同验收，校验失败附原因并有限重试；提供商能力映射不选择流程或分句算法。
 
-`PipelineDisplay` 从连续词范围计算 cue，合并重叠/同起点文字，在可用静音内延长显示，生成最终 ID。原词时码不修改；两行换行尽量均衡，可见字符计数排除换行。联合共屏译文过长时清空该最终 cue 的译文并补译，保留其他有效结果。阅读速度是提示词目标；显示延长受后句和最长时间限制，不能保证达到最短显示或速度目标。最终 cue 生成后冻结，继续处理和定向重翻仅替换译文。
+PipelineDisplay 从模型选择的连续词范围计算纯原文 cue，合并重叠/同起点文字，在可用静音内延长显示并生成最终 ID。ProgramSegmentation 保留 CueBuilder 对零时长词的处理，再在可用静音内满足最短显示目标。原词时码不修改；最终 cue 在分句版本中固定，翻译只替换译文并按两行目标换行，不再以译文长度调整时间。
 
-每个成功块独立原子保存，读取时重新验证；自然候选处拆小块后仍复用成功子块。管线与 ASR、翻译分别缓存。取消保留成功块，修改执行设置生成独立身份，仅改名称/说明不失效。所有请求的采样覆盖和 grammar 随预算裁剪保持，预览使用相同实际 tokenizer。
+每个成功块独立原子保存并重新验收；按原词范围拆小块后复用成功子块。SegmentationIdentity 与 TranslationIdentity 分别描述本步参数，Core 请求的 OutputContract 随上下文预算裁剪保留。分句身份不包含翻译提示词、批次、行宽和阅读速度；翻译身份不包含分句提示词、候选规划或分块参数。名称、说明、ID 不影响执行身份。
 
 ## 翻译流程
 
@@ -71,7 +72,7 @@ Core 定义领域模型、接口和纯逻辑，不引用 Avalonia 或 Infrastruc
 - `PromptBuilder` 使用有限变量白名单，一次替换并正确处理 JSON；不执行模板表达式，也不再解释原文中的大括号。预设和输出格式位于 Core 的生产类型，不另写一套 UI 专用规则。
 - 批量模板的批次受模板中条数与字符预算限制，单条模板固定请求一条。固定波次并发，前文取该波次开始时的稳定快照，避免完成顺序改变上下文和缓存身份。
 - `PromptProfile.BatchTranslation` 是单条/批量模式的唯一来源，输出协议由其推导；`ITranslationEngine` 不再声明输出格式。兼容 API、DeepSeek 与 `LocalTranslationEngine` 都可返回纯文本或 JSON，由编排器按模板交给统一校验器。本地并发默认 2、线上默认 4，范围均为 1～8，请求粒度与模板一致。本地复用 llama-server，经流式 completion 检查 EOS、输出长度、取消和超时。
-- `DesktopJobService` 以运行配置及模型/运行包文件版本判断是否可复用服务，版本只读取完整路径、大小及最后修改时间。同版本且 `/health` 可用时复用已有引擎，跳过运行程序能力检查与模型加载。冷启动时 `LlamaServerBinary` 检查帮助、版本、Vulkan 设备并核对运行包内容哈希；模型只持有读取句柄，不计算模型哈希或解析 GGUF metadata，不核对其架构/量化与预设。加载错误由 llama.cpp 报告，原始诊断经脱敏进入日志；媒体识别上传前完成本地就绪检查。`ModelFileVersion`、运行配置与运行包身份进入翻译缓存，协议版本为 `local-pipeline-completion-v4`，保留旧缓存文件但不混用旧模型哈希身份。
+- `DesktopJobService` 按运行配置及模型/运行包文件版本复用服务；文件版本只读取完整路径、大小及修改时间。同版本且 `/health` 可用时复用引擎，冷启动检查运行包能力、Vulkan 设备与运行包内容哈希。模型只持有读取句柄，不计算内容哈希或解析 GGUF；加载错误由 llama.cpp 报告并脱敏记录。在需要模型的步骤执行前检查本地就绪。运行配置与文件版本进入翻译缓存，协议为 `local-pipeline-completion-v4`；保留旧缓存但不混用旧身份。
 - `LlamaServerSession` 用 `ProcessCommandRunner.CreateStartInfo` 创建无窗口进程，清除继承的 llama.cpp 参数覆盖；只监听 127.0.0.1，通过 `--port 0` 分配端口，关闭 Web UI 和浏览器跨域访问。指定 Vulkan 设备、GPU 卸载层数、slot 数及总上下文长度；禁用自动容量调整和共享 KV 池，核对 `/props` 的每 slot 上下文与容量。GPU 证据仅来自本次进程的模型加载日志，必须具备选定 Vulkan 设备、GPU 模型缓冲及非零层卸载。
 - `PromptBuilder` 统一渲染前文（原文及已有译文）、后文（仅原文）与当前字幕，JSON 保留可读中文；默认前文 5 条、后文 2 条，共享字符预算。`TranslationRequest.PromptContext` 保留模板与参考条目，`EmbeddedPromptBudget.PrepareAsync` 经服务端 `/apply-template` 与 `/tokenize` 使用实际 tokenizer 逐条移除较远参考内容，不截断当前字幕或指令；参考全部移除仍超限时抛出 `PromptCapacityException`；编排器递归拆分批次，直到可执行或单条仍超限并明确失败，不截断/丢弃当前字幕。本地请求预览经同一裁剪和 chat template 返回实际提示词及 token 数；`/completion` 接收这份最终提示词，保证预算和预览与生成一致。
 - 成功译文校验后持久化，每批结束发布 `TranslationProgress` 中的有效 cue 和失败 ID。桌面合并交错通知，不让晚到快照清掉已显示的成功译文。
@@ -86,13 +87,13 @@ Core 定义领域模型、接口和纯逻辑，不引用 Avalonia 或 Infrastruc
 
 | 状态 | 归属与用途 |
 | --- | --- |
-| `Page` / `Step` | 页面导航与三步位置；与业务进度分开 |
+| `Page` / `Workspace.SelectedStep` | 项目列表、项目详情、设置、日志导航；步骤随媒体当前管线定义，与处理进度分开 |
 | `Settings`、提示词编辑字段 | 设置页草稿；编辑本身不改变已有结果 |
 | `_savedSettings` | 最后成功保存的非敏感配置快照 |
-| `TaskSourceLanguage`、`TaskTargetLanguage`、`TaskProviderIndex`、`TaskPipeline` | 本次选项，默认来自已保存配置/模型关联；快照 TaskPipelineId 保存本次覆盖，不修改模型默认值 |
+| 媒体 `Options` / `ModelOverrides` | 媒体管线和语言草稿，及按步骤的模型覆盖；执行前捕获快照 |
 | `_jobSettings`、`_jobInputPath` | 实际任务启动时的配置和文件，结果预览、重翻及导出依据 |
 | `LocalModelId`、`ModelFiles`、`ModelPath`、`ModelSha256` | 选中预设、各模型路径及下载来源哈希、当前路径及下载哈希；手动选择清空哈希，历史哈希不参与运行前校验或缓存身份；保存后进入任务快照 |
-| `PipelineLibrary` / `ModelPipelineBindings` | 自定义管线、模型到默认管线 ID 的关联；内置在 Core，删除移除显式引用并回退模型默认值，同一配置原子保存 |
+| `PipelineLibrary` / `Models` / `PipelineModelDefaults` | 自定义管线、模型服务/推理档案与管线步骤默认模型；模型不包含默认管线 |
 | `SelectedPipeline` / 步骤编辑字段 | 独立草稿，不随模型切换；包含分句、翻译提示词及参数，阶段切换仅导航；未保存管线切换提供保存/放弃/取消 |
 | `Rows` / `CueSelection` | 字幕及 `SelectionModel<CueRow>` 多选；区分等待、翻译中、失败、取消，原文和时间保持稳定；行替换后按 ID 恢复选择，新任务清空选择 |
 | `IsBusy` / `_isMediaJob` / cancellation | 串行保护长操作，区分媒体处理与服务测试 |
@@ -100,9 +101,9 @@ Core 定义领域模型、接口和纯逻辑，不引用 Avalonia 或 Infrastruc
 | `ElevenLabsKey` / `TranslationKey` | 解锁后的编辑字段，翻译字段按当前设置 provider 映射；非 AppSettings 成员 |
 | `CredentialStore` / `IsCredentialBusy` | 加密文件、会话派生密钥、三个服务凭证和串行凭证操作；启动默认锁定 |
 
-任务启动复制已保存配置并覆盖本次选项。保存设置只影响新任务，服务测试显式使用当前草稿和所选管线翻译阶段；只校验当前管线，保存/加载完整校验全部库。继续处理使用原任务快照；最终 cue 已生成时只补译，不重新运行分句，也不恢复已失效的联合旧译文。
+ProjectWorkspaceViewModel 管理实际步骤、每步预览版本、内容与直接执行的步骤按钮。MediaSettings 取媒体快照并合并当前模型注册与资产；ForStep 按批量冻结模型→媒体步骤覆盖→管线默认模型解析。执行时捕获完整配置；继续/失败重试始终沿用原版本配置与直接上游，重新执行创建新版本。新媒体捕获已保存的全局默认设置；项目 DefaultSettings 仅用于兼容缺少选项的历史媒体，不再编辑或用于导入。模型准备发生在需要模型的步骤内，准备失败写入该版本失败状态。
 
-`EmbeddedModel.DefaultPipelineId` 指定模型默认流程，默认线上联合、1.8B 直接、7B/Index 两步；用户可以更改关联或在任务覆盖。管线完整深拷贝进任务快照，名称/说明/ID 不参与执行缓存身份。各步骤共用任务模型，采样留空使用模型/服务默认值；本地 Index 默认 greedy 0/1/40/1，Hy 默认 .7/.6/20/1.05，均由阶段覆盖。llama-server 启用 Jinja 与 enable_thinking=false。
+ModelProfile 只捕获服务、推理与资产参数，排除管线、媒体选项及密钥。Models 以稳定模型 ID 保存配置档案；PipelineModelDefaults 支持内置与自定义管线的分句/结果默认模型。媒体 ModelOverrides 按 TaskStage 独立覆盖。ASR 步骤可独立设置现有 ElevenLabs 模型。采样覆盖属于管线；Index 本地默认 greedy，Hy 保留现有采样，llama-server 使用 Jinja 与 enable_thinking=false。
 
 `MainWindowViewModel.Inference` 投影当前引擎的并发数和线上可空的输出 token 数，配置继续分别存储 `LocalConcurrency`/`TranslationConcurrency`、`LocalMaximumTokens`/`MaximumTokens`，仍复用原并发与默认输出字段；阶段采样覆盖另归管线；模型上下文容量减少时缩小超过半容量的本地输出值。准备流程通过 `LocalPreparationProgress` 从服务工厂、实际 llama-server 启动会话及测试请求上报阶段，时间戳用于阶段日志；UI dispatcher 排空当前通知后才移交识别或最终测试状态。阶段包括运行程序检查、进程启动、模型加载、服务检查、就绪及复用服务，不再包含模型校验。下载完整性校验只在下载流程执行。
 
@@ -110,7 +111,7 @@ Core 定义领域模型、接口和纯逻辑，不引用 Avalonia 或 Infrastruc
 
 日志通过 Avalonia `SelectionModel<string>` 按行索引选择，复制命令按原顺序拼接完整条目，避免相同文本的未选行被误复制；`WindowDialogs` 封装窗口剪贴板写入。
 
-重翻所选字幕和请求预览使用原任务配置；导出命名使用原任务目标语言。重翻命令在确认前按显示顺序捕获所选 ID 集合，确认后核对原任务仍有效，复用定向重翻接口，只清除所选译文；单条/多条提示与云端费用按任务快照显示。`TargetedRetry` 映射为重新翻译中并更新行状态，取消/失败正确标记正在请求的条目；有效译文不显示失败样式。更换输入清除旧任务和结果；新建任务回到第一步并载入已保存默认值。调整选项后重新处理才生成另一份配置对应的结果。配置正确且初始化完成后，命令按状态启用；处理中允许导航，相关编辑和步骤切换锁定。
+结果版本携带源词范围及固定 cue，直接上游永远为 Subtitles。重翻创建 Operation=Retranslate 新版本，记录 BaseResultVersionId，使用当前结果步骤模型并强制清除所选译文；继续/失败重试读取本版本快照。StageSettingsSnapshot 仅保存本步字段、单一执行管线定义及已解析的模型参数/引用，隔离未使用步骤和其他提供商配置。导出使用所预览版本语言快照。旧单媒体重翻与请求预览同样使用结果步骤快照。
 
 ## 缓存与敏感信息
 
@@ -118,10 +119,14 @@ Core 定义领域模型、接口和纯逻辑，不引用 Avalonia 或 Infrastruc
 
 | 路径 | 内容 |
 | --- | --- |
-| `settings.json` | schema 3 非敏感设置、自定义管线库及模型默认引用 |
+| `Projects/<project-id>/project.json` | schema 1 项目名、默认配置快照、媒体 ID 顺序及时间；项目列表由扫描重建 |
+| `Projects/<project-id>/Media/<media-id>/task.json` | schema 3 输入路径、媒体选项、步骤模型覆盖及当前 StageRecord 指针 |
+| `Projects/<project-id>/Media/<media-id>/Results/<stage>/<version-id>/` | result.json、stage.json 依赖描述及本步骤的 WAV/请求缓存 |
+| `workspace.json` | 最近打开的项目和媒体 ID，无业务状态 |
+| `settings.json` | schema 5 非敏感设置、模型档案、自定义管线、步骤默认模型及旧联合提示词档案 |
 | `credentials.json` / `credentials.lock` | 主密码加密凭证；后者为修改时的排他文件句柄，不包含秘密 |
 | `Jobs/<job-id>/` | 输入/音频/VAD/分片/识别记录及状态 |
-| Pipelines/<identity>/ | 分句/联合逐块接受响应及最终 cue/词范围，取消保留成功块 |
+| Pipelines/<identity>/ | 模型分句逐块接受响应及最终 cue/词范围，取消保留成功块 |
 | Translations/<identity>/ | 翻译批次、结果及状态 |
 | `Working/` | 处理期间的临时输出 |
 | `llama.cpp/<tag>-<digest-prefix>/` | 独立版本的官方 Vulkan 运行包、对应 LICENSE 与 installation.json；不同版本不原地覆盖 |
@@ -129,13 +134,13 @@ Core 定义领域模型、接口和纯逻辑，不引用 Avalonia 或 Infrastruc
 | `<model-id>.gguf` | 本地模型默认文件；与配置文件同级，远端文件名变化不改变本地默认路径 |
 | `<model-id>.gguf.partial` / `.partial.json` / `.download.lock` | 下载片段、本次官方元数据和下载排他句柄；取消保留可续传片段 |
 
-ASR、字幕管线与翻译缓存分开。管线身份包含引擎、词文本/时间/说话人、媒体时长、语言风格及执行设置，块身份包含实际提示词/采样/GBNF；翻译身份包含最终 cue、翻译阶段、语言风格及上下文。名称、说明及 ID 不参与身份，API Key 不进入任何身份。缓存读取重新验收，成功结果原子保存，锁文件防止同任务并写。
+ASR、分句与翻译分别缓存。分句身份含引擎、原始词、时长、分句参数及提示词使用的语言；块身份含实际消息、采样和输出契约。翻译身份含最终 cue、本步模板/采样/批次/上下文与语言风格，请求身份含实际消息、输入和契约。ModelProfile.ExecutionParameters 只取当前提供商的参数。API Key 不进入身份，读取时重新校验，成功结果原子保存，锁文件防止并写；旧身份缓存保留，不假设旧协议可直接套用新请求。
 
 原子写保护完整性，作业文件句柄提供互斥；锁文件仍在不表示作业仍被占用。缓存包含音频、原文、译文，不能当作可公开测试 fixture。迁移缓存格式要考虑身份变化、旧数据校验和重新计费影响。
 
 `ModelDownloadService` 动态发现官方唯一量化 GGUF；续传仅复用同资产片段，校验 Range、大小、GGUF 文件头与可用 SHA 后原子替换，失败保留旧文件。手动文件不联网核对官方身份，也不计算内容哈希，延续 D018。
 
-`ConfigurationStore` 根据 Root 生成默认路径；schema 3 不迁移旧设置，备份较旧 JSON 后原子重建默认值。未来版本或损坏 JSON 不覆盖，凭证/模型/运行包/缓存保留。模型切换恢复自己的路径及默认关联，不触碰编辑草稿；改变管线不重启 llama-server。
+ConfigurationStore 使用 Root 生成默认路径，将 schema 3/4 备份后迁移为 5；旧联合内置 ID 映射到模型分句，旧自定义联合提示词存入 ArchivedPipelines，活跃分句提示词改用安全独立模板。更早配置备份后重建。ProjectStore 先将 task schema 1 的明确路径迁为版本引用，再备份升级到 3。旧联合结果仅在连续词覆盖、原文和词时间均可核实时导入新分句/结果版本（ImportedFromVersionId），保留旧 cue 和时码及原文件；无法导入的结果原文件保留，不提供专用浏览入口，也不进入当前候选。迁移可重复执行，未来格式或损坏 JSON 不覆盖，凭证、资产和缓存保留。
 
 下载仍只修改设置草稿，保存后用于新任务；下载前释放闲置服务，处理中禁止下载或改模型，关闭等待推理再释放。GGUF 与运行包共用 `ResumableDownload`，保持动态修订、Range、取消和安全解压；独立运行包版本不原地覆盖。
 
@@ -151,7 +156,7 @@ ASR、字幕管线与翻译缓存分开。管线身份包含引擎、词文本/�
 
 `MainWindowViewModel.Credentials` 负责状态与命令，主密码只在独立对话框短暂输入，退出对话框清空字段。密钥不放入任务配置快照；真实调用按任务快照 provider 获取对应会话密钥，重翻不受当前设置页引擎影响。兼容服务密钥关联规范化地址，更换地址后需确认或重填，任务仍依据已保存服务地址判定。非敏感配置保存和日志脱敏检查全部服务密钥。
 
-第一步及步骤导航校验主密码与 ElevenLabs 密钥，运行校验任务引擎所需凭证；云端测试使用设置草稿，重翻使用原任务服务。锁定不清空字幕，导出不依赖凭证。所有凭证编辑操作在业务处理期间禁用，凭证操作期间阻止启动业务；关闭取消并等待凭证操作后释放会话。没有自动锁定计时器或环境变量回退。
+导航和历史查看不要求凭证；运行按步骤和快照检查所需密钥，云端测试使用设置草稿。锁定不清空字幕，导出不依赖凭证。凭证编辑在处理中禁用，凭证操作时阻止启动处理；输入框失焦及保存设置均通过串行草稿保存链加密落盘；保存失败保留输入。锁定等待保存，关闭等待已触发的保存后释放会话。没有自动锁定或环境变量回退。
 
 ## 线程、取消与释放
 
@@ -159,10 +164,16 @@ ASR、字幕管线与翻译缓存分开。管线身份包含引擎、词文本/�
 
 关闭窗口先请求取消，等待当前操作，再释放本地服务进程、HTTP 和会话凭据，最后排队关闭窗口，避免同步释放时重入 Closing。配置改变使本地引擎身份变化时，先结束旧服务再创建新实例。单条取消关闭对应流式连接，由服务撤销任务并归还 slot；进程异常退出不沿用旧 GPU 证据。Windows Job Object 随父进程句柄回收，防止应用异常结束后遗留服务。窗口事件订阅需有对应取消订阅，不能因导航增加多份回调。
 
+## 项目执行与依赖版本
+
+ProjectTaskService 复用既有生产编排；State 是执行事实，NeedsUpdate/ResultUnavailable 是独立可用性标记。每个 StageRecord 首次执行捕获 Version、CreatedAt、UpstreamStage、UpstreamVersionId、Operation、配置快照与结果路径。依赖以步骤和版本 ID 为准；内容哈希仅用于缓存。完成版本不会被继续处理覆盖。
+
+WorkPlanKnown/UnitStates 记录实际处理覆盖，拆块纳入子块计划。Complete 继续未完成版本；RetryFailed 在无未处理单元时处理记录的失败单元；Restart 建新版本。ProjectStore 按固定直接上游 ID 级联选最新 CreatedAt 下游（包括失败），无匹配清空指针，历史保留。SetCurrent 同样级联；VersionsAsync 当前列表只显示匹配父版本的候选。切换分句方式不改变依赖链或 Tab，程序/模型分句版本可互相选用；旧联合档案不得进入新链。
+
+ProjectStore 校验 GUID、schema、阶段状态与相对结果路径，拒绝越出媒体目录。持有项目排他锁后恢复 Running 为 Interrupted；未来格式/损坏清单提示错误并保留原文件。窗口打开项目只读已有结果，不自动发起付费操作。项目内顺序遍历保存的媒体列表，普通媒体错误记录并继续，取消/凭证错误停止。
+
 ## 当前实现的明确限制
 
-失败任务的恢复当前始终使用旧 _jobSettings。返回选项更改 TaskPipeline 只更新界面选择，没有退出 CanContinue，导致新选择未应用；最终 cue 已生成时还会跳过分句。这是待修复的状态转换缺陷，不是“调整选项后重新处理”的产品设计。已知问题、隔离复现和临时操作见[验证状态](status.md#已知问题失败后调整管线未应用待修复)。
-
-云端地址、模型及生成参数目前由兼容接口与 DeepSeek 共用一组配置字段；字幕管线库与模型默认关联已独立，密钥已分为 ElevenLabs、兼容服务和 DeepSeek 三个独立槽位，翻译页按引擎显示对应输入。工作台可选 provider，但不代表已实现多个服务配置档案或多账户凭据管理。以后扩展这些能力需要独立计划并测试配置隔离，不能在交接中声称已经具备。
+云端设置页仍以当前兼容/DeepSeek 服务字段编辑模型档案；保存后 Models 保存所选服务档案，媒体步骤可以独立选择预置 DeepSeek、已配置服务档案及三个本地预设；模型列表与密钥状态无关，保存服务设置后立即刷新工作台与管线模型列表。密钥仍仅三个服务槽位，不提供多账户凭据或任意 GGUF 管理。模型档案不携带密钥，运行按快照 provider/地址检查对应凭证。
 
 运行日志保留最近 200 条；没有多账户管理、播放器或编辑器。真实服务/GPU证据与人工验收边界见[验证状态](status.md)。

@@ -12,19 +12,19 @@ public partial class MainWindowViewModel
     {
         get
         {
-            var id = _taskPipelineId ?? _savedSettings.GetPipeline((TranslationProvider)TaskProviderIndex).Id;
+            var id = _taskPipelineId ?? (_taskOptionBase ?? _savedSettings).GetPipeline((TranslationProvider)TaskProviderIndex).Id;
             return TaskPipelineItems.FirstOrDefault(p => p.Id == id);
         }
         set
         {
             if (!CanConfigure || value is null || value.Id == TaskPipeline?.Id) return;
-            _taskPipelineId = value.Id; OnPropertyChanged(); OnPropertyChanged(nameof(TaskPromptSummary));
+            _taskPipelineId = value.Id; OnPropertyChanged(); OnPropertyChanged(nameof(TaskPromptSummary)); OnPropertyChanged(nameof(TaskOptionsChanged)); OnPropertyChanged(nameof(RunButtonText));
         }
     }
     private void RefreshTaskPipelines()
     {
-        if (_taskPipelineId is not null && !_savedSettings.AllPipelines.Any(p => p.Id == _taskPipelineId)) _taskPipelineId = null;
-        SynchronizePrompts(TaskPipelineItems, _savedSettings.AllPipelines.ToArray());
+        if (_taskPipelineId is not null && !(_taskOptionBase ?? _savedSettings).AllPipelines.Any(p => p.Id == _taskPipelineId)) _taskPipelineId = null;
+        SynchronizePrompts(TaskPipelineItems, (_taskOptionBase ?? _savedSettings).AllPipelines.ToArray());
         OnPropertyChanged(nameof(TaskPipeline)); OnPropertyChanged(nameof(TaskPromptSummary));
     }
 }

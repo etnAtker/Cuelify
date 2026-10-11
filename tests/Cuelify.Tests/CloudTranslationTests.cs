@@ -70,7 +70,7 @@ public sealed class CloudTranslationTests
         using var http = new HttpClient(handler);
         var options = Options with { BaseUrl = official ? "https://api.deepseek.com" : Options.BaseUrl, Temperature = .7, TopP = .8, MaximumTokens = 2000 };
         ITranslationEngine engine = official ? new DeepSeekOfficialProvider(http, () => "fixture", options, new(false)) : new OpenAiCompatibleTranslationEngine(http, () => "fixture", options);
-        var stage = Request with { Parameters = new() { Temperature = .1, TopP = .9, MaximumTokens = 321 }, Grammar = "root ::= \"{}\"" };
+        var stage = Request with { Parameters = new() { Temperature = .1, TopP = .9, MaximumTokens = 321 }, OutputContract = new() { Kind = GenerationOutputKind.Translation, CueIds = ["a"], Format = TranslationOutputFormat.CueIdJson, MaximumTextCharacters = 44 } };
         Assert.Equal("{\"ends\":[1]}", (await engine.TranslateAsync(stage, default)).Content);
     }
 

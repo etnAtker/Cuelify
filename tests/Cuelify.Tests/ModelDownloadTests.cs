@@ -114,7 +114,7 @@ public sealed class ModelDownloadTests
         using var http = new HttpClient(handler);
         var result = await new ModelDownloadService(http).DownloadAsync(model, directory.File("models"), new Sink(), default);
         Assert.Equal(Payload, await File.ReadAllBytesAsync(result.Path)); Assert.EndsWith(model.DefaultFileName, result.Path);
-        Assert.Equal(0, model.DefaultParameters.Temperature); Assert.Equal("pipeline-two-stage", model.DefaultPipelineId);
+        Assert.Equal(0, model.DefaultParameters.Temperature); Assert.DoesNotContain("Pipeline", System.Text.Json.JsonSerializer.Serialize(model));
     }
 
     [Fact]

@@ -11,20 +11,26 @@ namespace Cuelify.Desktop.Tests;
 
 public sealed class InferenceUiTests
 {
+    private static void SetStepModels(Cuelify.Desktop.ViewModels.MainWindowViewModel model)
+    {
+        var profile = ModelProfile.Capture(model.Settings); model.Settings.Models[profile.Id] = profile;
+        foreach (var defaults in model.Settings.PipelineModelDefaults.Values)
+        { defaults[Cuelify.Core.Projects.TaskStage.Subtitles] = profile.Id; defaults[Cuelify.Core.Projects.TaskStage.Translation] = profile.Id; }
+    }
     [AvaloniaFact]
     public async Task LlamaModelLoadFailureShowsActionableErrorAndPreservesNativeDiagnostic()
     {
         using var fixture = new Fixture();
         fixture.Jobs.PreparationFailure = new LocalTranslationException("ModelLoad", "加载失败", "llama_model_loader: invalid magic\nfailed to load model fake-translation");
         await using var model = fixture.Model(); model.Settings.Provider = TranslationProvider.Local;
-        await model.SaveSettingsCommand.ExecuteAsync(null); model.TaskProviderIndex = 2; model.InputPath = "fixture.mp4";
+        SetStepModels(model); await model.SaveSettingsCommand.ExecuteAsync(null); model.TaskProviderIndex = 2; model.InputPath = "fixture.mp4";
         await model.RunCommand.ExecuteAsync(null);
         Assert.Contains("llama.cpp 无法加载模型", model.Error);
         Assert.DoesNotContain("invalid magic", model.Error);
         Assert.Contains(model.Log, line => line.Contains("invalid magic"));
         Assert.DoesNotContain(model.Log, line => line.Contains("fake-translation"));
         Assert.DoesNotContain(model.Log, line => line.Contains("校验模型"));
-        Assert.Equal(0, fixture.Jobs.Transcriptions);
+        Assert.Equal(1, fixture.Jobs.Transcriptions);
     }
 
     [AvaloniaTheory]
@@ -49,19 +55,19 @@ public sealed class InferenceUiTests
         Assert.False(cloudTokens.IsEffectivelyVisible); Assert.True(localTokens.IsEffectivelyVisible);
         concurrency.Value = 3; localTokens.Value = 2000;
         model.Settings.ContextSize = 512; await Flush();
-        Assert.Equal(256m, localTokens.Maximum); Assert.Equal(256m, localTokens.Value);
-        model.Settings.ContextSize = 32768; await Flush(); Assert.Equal(16384m, localTokens.Maximum);
-        localTokens.Value = 8000;
+        Assert.Equal(2000m, localTokens.Value); Assert.Equal(2000, model.Settings.LocalMaximumTokens);
+        model.Settings.ContextSize = 32768; await Flush();
+        localTokens.Value = 20000; await Flush(); Assert.Equal(20000, model.Settings.LocalMaximumTokens);
         model.ProviderIndex = 1; await Flush(); Assert.Equal(6m, concurrency.Value); Assert.Null(cloudTokens.Value);
         cloudTokens.Value = 4096;
-        await model.SaveSettingsCommand.ExecuteAsync(null);
+        SetStepModels(model); await model.SaveSettingsCommand.ExecuteAsync(null);
         var loaded = (await fixture.Store.LoadAsync())!;
         Assert.Equal(6, loaded.TranslationConcurrency); Assert.Equal(3, loaded.LocalConcurrency);
-        Assert.Equal("4096", loaded.MaximumTokens); Assert.Equal(8000, loaded.LocalMaximumTokens);
+        Assert.Equal("4096", loaded.MaximumTokens); Assert.Equal(20000, loaded.LocalMaximumTokens);
         Assert.Equal(4096, loaded.CloudOptions().MaximumTokens);
         Assert.Contains("限流", model.ConcurrencyHint);
         cloudTokens.BringIntoView(); await Flush(); Capture(window, $"inference-cloud-{width}-{theme}.png");
-        model.ProviderIndex = 2; await Flush(); Assert.Equal(3m, concurrency.Value); Assert.Equal(8000m, localTokens.Value);
+        model.ProviderIndex = 2; await Flush(); Assert.Equal(3m, concurrency.Value); Assert.Equal(20000m, localTokens.Value);
         Assert.Contains("显存", model.ConcurrencyHint); Assert.Contains("5 分钟", model.TimeoutHint);
         localTokens.BringIntoView(); await Flush(); Capture(window, $"inference-local-{width}-{theme}.png");
         window.Close();
@@ -75,21 +81,20 @@ public sealed class InferenceUiTests
         using var fixture = new Fixture(); fixture.Jobs.BlockPreparation = true;
         await using var model = fixture.Model(); await model.InitializeCommand.ExecuteAsync(null);
         model.Settings.Provider = TranslationProvider.Local; model.Settings.Theme = theme;
-        await model.SaveSettingsCommand.ExecuteAsync(null); model.TaskProviderIndex = 2;
+        SetStepModels(model); await model.SaveSettingsCommand.ExecuteAsync(null); model.TaskProviderIndex = 2;
         model.InputPath = "fixture.mp4"; await model.NextStepCommand.ExecuteAsync(null);
         var window = new MainWindow { DataContext = model, Width = width, Height = height }; window.Show();
         var run = model.RunCommand.ExecuteAsync(null); await fixture.Jobs.PreparationStarted.Task; await Flush();
-        Assert.True(model.IsOptionsStep); Assert.True(model.IsPreparing); Assert.True(model.IsBusy); Assert.False(model.CanConfigure);
+        Assert.True(model.IsResultsStep); Assert.True(model.IsPreparing); Assert.True(model.IsBusy); Assert.False(model.CanConfigure);
         Assert.Equal("正在加载本地模型…", model.PreparationStatus); Assert.StartsWith("已用时", model.PreparationElapsed);
         Assert.Contains(model.Log, line => line.Contains("正在检查 llama.cpp 运行程序：已完成（耗时"));
-        var panel = window.FindControl<WorkspaceView>("WorkspacePage")!.FindControl<PreparationStatusView>("WorkspacePreparation")!;
-        var message = panel.FindControl<TextBlock>("PreparationMessage")!;
+        var message = window.FindControl<TextBlock>("ActiveProgressMessage")!;
         Assert.True(message.IsEffectivelyVisible); Assert.True(message.Bounds.Height > 0);
         Capture(window, $"preparing-{width}-{theme}.png");
         model.ShowLogsCommand.Execute(null); Assert.True(model.IsPreparing);
         model.CancelCommand.Execute(null); Assert.Equal("正在取消…", model.PreparationStatus);
-        await run; Assert.False(model.IsPreparing); Assert.False(model.IsBusy); Assert.False(model.CanContinue);
-        Assert.Equal(0, fixture.Jobs.Transcriptions); Assert.Equal("已取消", model.Status);
+        await run; Assert.False(model.IsPreparing); Assert.False(model.IsBusy); Assert.True(model.CanContinue);
+        Assert.Equal(1, fixture.Jobs.Transcriptions); Assert.Equal("已取消", model.Status);
         fixture.Jobs.PreparationProgress!.Report(new(LocalPreparationStage.Ready)); await Flush();
         Assert.Equal("已取消", model.Status); Assert.Contains(model.Log, line => line.Contains("准备已取消"));
         window.Close();
@@ -100,14 +105,14 @@ public sealed class InferenceUiTests
     {
         using var fixture = new Fixture(); fixture.Jobs.BlockPreparation = true;
         await using var model = fixture.Model(); model.Settings.Provider = TranslationProvider.Local;
-        await model.SaveSettingsCommand.ExecuteAsync(null); model.TaskProviderIndex = 2; model.InputPath = "fixture.mp4";
+        SetStepModels(model); await model.SaveSettingsCommand.ExecuteAsync(null); model.TaskProviderIndex = 2; model.InputPath = "fixture.mp4";
         var run = model.RunCommand.ExecuteAsync(null); await fixture.Jobs.PreparationStarted.Task; await Flush();
         fixture.Jobs.ReleasePreparation.TrySetResult(); await run; await Flush();
         Assert.True(model.CanExport); Assert.Equal("翻译完成，可以导出字幕", model.Status);
         Assert.False(model.IsPreparing); Assert.Equal(1, fixture.Jobs.Transcriptions);
         Assert.Contains(model.Log, line => line.Contains("本地服务已就绪"));
-        Assert.Contains(model.Log, line => line.Contains("正在检查媒体"));
-        Assert.Contains(model.Log, line => line.Contains("开始识别语音"));
+        Assert.Contains(model.Log, line => line.Contains("Chunking"));
+        Assert.Contains(model.Log, line => line.Contains("Asr"));
         fixture.Jobs.PreparationProgress!.Report(new(LocalPreparationStage.LoadingModel)); await Flush();
         Assert.Equal("翻译完成，可以导出字幕", model.Status);
     }
@@ -117,10 +122,10 @@ public sealed class InferenceUiTests
     {
         using var fixture = new Fixture(); fixture.Jobs.PreparationFailure = new IOException("模拟加载失败");
         await using var model = fixture.Model(); model.Settings.Provider = TranslationProvider.Local;
-        await model.SaveSettingsCommand.ExecuteAsync(null); model.TaskProviderIndex = 2;
+        SetStepModels(model); await model.SaveSettingsCommand.ExecuteAsync(null); model.TaskProviderIndex = 2;
         model.InputPath = "fixture.mp4"; await model.NextStepCommand.ExecuteAsync(null); await model.RunCommand.ExecuteAsync(null);
-        Assert.True(model.IsOptionsStep); Assert.False(model.IsPreparing); Assert.True(model.CanConfigure);
-        Assert.False(model.CanContinue); Assert.Equal(0, fixture.Jobs.Transcriptions); Assert.NotEmpty(model.Error);
+        Assert.True(model.IsResultsStep); Assert.False(model.IsPreparing); Assert.True(model.CanConfigure);
+        Assert.True(model.CanContinue); Assert.Equal(1, fixture.Jobs.Transcriptions); Assert.NotEmpty(model.Error);
         Assert.Contains(model.Log, line => line.Contains("准备失败"));
         fixture.Jobs.PreparationFailure = null; await model.RunCommand.ExecuteAsync(null); Assert.True(model.CanExport);
     }
@@ -157,11 +162,11 @@ public sealed class InferenceUiTests
     {
         using var fixture = new Fixture(); fixture.Jobs.BlockPreparation = true;
         var model = fixture.Model(); model.Settings.Provider = TranslationProvider.Local;
-        await model.SaveSettingsCommand.ExecuteAsync(null); model.TaskProviderIndex = 2; model.InputPath = "fixture.mp4";
+        SetStepModels(model); await model.SaveSettingsCommand.ExecuteAsync(null); model.TaskProviderIndex = 2; model.InputPath = "fixture.mp4";
         var run = model.RunCommand.ExecuteAsync(null); await fixture.Jobs.PreparationStarted.Task;
         await model.DisposeAsync(); await run;
         Assert.False(model.IsPreparing); Assert.False(model.IsBusy); Assert.True(fixture.Jobs.Disposed);
-        Assert.Equal(0, fixture.Jobs.Transcriptions);
+        Assert.Equal(1, fixture.Jobs.Transcriptions);
     }
 
     private static async Task Flush() => await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Background);

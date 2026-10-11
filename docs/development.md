@@ -94,7 +94,7 @@ dotnet test tests/Cuelify.Tests/Cuelify.Tests.csproj -c Release --filter 'FullyQ
 
 ### 字幕管线实际验证
 
-普通回归覆盖全部模型/管线组合的配置、词覆盖与边界、阶段缓存/取消、预算和请求参数，以及任务覆盖、联合跳过第二阶段、继续处理冻结时间轴和真实 headless 编辑器。真实测试读取显式指定的已有 ASR Words 缓存，不重新调用 ElevenLabs，也不把历史 ASR 当成本轮请求。
+普通回归覆盖提供商无关输出契约、程序/模型分句同构、阶段校验和缓存隔离、版本级联、仅本步快照、重翻冻结以及配置/旧联合结果迁移。真实测试读取显式指定的已有 ASR Words，不重新调用 ElevenLabs。
 
 ```powershell
 $env:CUELIFY_LOCAL_MODEL = '<已有 7B 或 Index GGUF 的绝对路径>'
@@ -105,6 +105,6 @@ $env:CUELIFY_LOCAL_ARTIFACTS = Join-Path (Get-Location) 'artifacts/pipelines/loc
 dotnet test tests/Cuelify.Desktop.Tests/Cuelify.Desktop.Tests.csproj -c Release --filter 'FullyQualifiedName~SubtitlePipelineGpuTests'
 ```
 
-默认验收先分句后翻译，可设 CUELIFY_PIPELINE_SECONDS 限制样本；CUELIFY_PIPELINE_ID 可选择联合流程，但本地模型未必能可靠完成，失败不能当作通过。用例实际生成、导出、复用成功阶段、重翻一条并保持其余 cue/时码，还另生成一句取得服务 GPU 证据并验证释放。测试参数为每请求上下文 16384、并发 1，不代表默认 4096/并发 2 的耗时或容量结论。
+默认验收模型分句后翻译，可设 CUELIFY_PIPELINE_SECONDS 限制样本；联合流程已移除。用例实际分句、翻译、导出、复用成功阶段、重翻一条并保持其余 cue/时码；另生成短句取得服务 GPU 证据并验证释放。测试每请求上下文 16384、并发 1，不代表默认 4096/并发 2 的容量和耗时。
 
-线上真实用例为 SubtitlePipelineCloudTests，需在测试进程显式提供 CUELIFY_PIPELINE_CLOUD_KEY 和上述词缓存/产物变量；会调用 DeepSeek 官方服务并产生费用，默认跳过。仅由已授权会话设置密钥，不能写进脚本、JSON、命令行参数或仓库。程序正常凭证流程仍不读取环境变量；此变量只属于显式验收。验收使用首 60 秒、非思考 deepseek-flash，记录联合请求、补译、缓存恢复和定向重翻。产物含原文和实际响应，保留在忽略目录，分享前检查。
+线上真实用例 SubtitlePipelineCloudTests 需显式授权费用并在测试进程提供 CUELIFY_PIPELINE_CLOUD_KEY 和上述词缓存/产物变量，默认跳过。密钥不可进入脚本、JSON、参数或仓库；正常应用凭证流程不读取该变量。用例使用首 60 秒、非思考 deepseek-flash，记录独立分句、翻译、缓存恢复和定向重翻。产物包含原文与实际响应，放忽略目录，分享前检查。

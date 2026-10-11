@@ -15,7 +15,7 @@ public sealed record EmbeddedModelOptions
     public void Validate()
     {
         _ = Model;
-        if (GpuLayers <= 0 || Concurrency is < 1 or > 8 || ContextSize is < 512 or > 32768 || MaximumTokens <= 0 || MaximumTokens > ContextSize / 2 ||
+        if (GpuLayers <= 0 || Concurrency is < 1 or > 8 || ContextSize is < 512 or > 32768 || MaximumTokens <= 0 ||
             InferenceTimeout <= TimeSpan.Zero || InferenceTimeout > TimeSpan.FromMinutes(10))
             throw new ArgumentException("本地模型参数无效，请检查并发数、GPU 卸载层数、上下文长度、最大输出长度和超时时间。");
     }

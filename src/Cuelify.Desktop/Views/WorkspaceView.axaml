@@ -1,121 +1,33 @@
 <UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:vm="using:Cuelify.Desktop.ViewModels" xmlns:views="using:Cuelify.Desktop.Views" x:Class="Cuelify.Desktop.Views.WorkspaceView" x:DataType="vm:MainWindowViewModel">
-  <Grid RowDefinitions="Auto,Auto,Auto,*,Auto" Margin="32,24">
-    <StackPanel Spacing="6">
-      <TextBlock Classes="title" Text="生成字幕" />
-      <TextBlock Classes="muted" Text="选择音视频，设置翻译选项，然后导出 SRT 字幕。" />
-    </StackPanel>
-    <Grid Grid.Row="1" ColumnDefinitions="*,Auto,*,Auto,*" Margin="0,24,0,20">
-      <Button Classes="step" Classes.current="{Binding IsFileStep}" Content="1　选择文件" Command="{Binding FileStepCommand}" HorizontalAlignment="Stretch" />
-      <TextBlock Grid.Column="1" Text="›" Classes="muted" VerticalAlignment="Center" Margin="12,0" />
-      <Button Grid.Column="2" Classes="step" Classes.current="{Binding IsOptionsStep}" Content="2　翻译选项" Command="{Binding OptionsStepCommand}" HorizontalAlignment="Stretch" />
-      <TextBlock Grid.Column="3" Text="›" Classes="muted" VerticalAlignment="Center" Margin="12,0" />
-      <Button Grid.Column="4" Classes="step" Classes.current="{Binding IsResultsStep}" Content="3　生成字幕" Command="{Binding ResultsStepCommand}" HorizontalAlignment="Stretch" />
+  <Grid RowDefinitions="Auto,*" Margin="20,16,20,12">
+    <Grid ColumnDefinitions="Auto,*,Auto" Margin="0,0,0,14">
+      <Button Content="‹ 项目" Command="{Binding ShowProjectsCommand}" Margin="0,0,12,0" />
+      <StackPanel Grid.Column="1" VerticalAlignment="Center"><TextBlock Text="{Binding SelectedProject.Name}" FontSize="20" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" /><TextBlock Classes="muted" Text="{Binding ProjectSummary}" FontSize="12" /></StackPanel>
+      <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6">
+        <Button Content="添加媒体…" Command="{Binding AddMediaCommand}" /><Button Content="批量处理…" Command="{Binding Workspace.BatchCommand}" IsEnabled="{Binding CanBatch}" />
+        <Button Content="重命名" Command="{Binding Workspace.RenameCommand}" IsEnabled="{Binding CanManageProject}" />
+      </StackPanel>
     </Grid>
-    <StackPanel Grid.Row="2" Spacing="8" Margin="0,0,0,12">
-      <TextBlock Classes="error" Text="{Binding Error}" TextWrapping="Wrap" />
-      <StackPanel Spacing="8" IsVisible="{Binding HasTaskCredentialHint}">
-        <TextBlock Classes="muted" Text="{Binding TaskCredentialHint}" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite" />
-        <StackPanel Orientation="Horizontal" Spacing="8">
-          <Button Content="{Binding CredentialActionText}" Command="{Binding ManageMasterPasswordCommand}" IsVisible="{Binding NeedsMasterPassword}" />
-          <Button Content="配置语音识别密钥" Command="{Binding ConfigureSpeechCommand}" IsVisible="{Binding NeedsSpeechKey}" />
-          <Button Content="配置翻译密钥" Command="{Binding ConfigureTranslationCommand}" IsVisible="{Binding NeedsTranslationKey}" />
-        </StackPanel>
-        <TextBlock Classes="muted" Text="{Binding CredentialStatus}" TextWrapping="Wrap" />
-      </StackPanel>
-    </StackPanel>
-    <ScrollViewer Grid.Row="3" IsVisible="{Binding IsFileStep}" HorizontalScrollBarVisibility="Disabled">
-      <StackPanel MaxWidth="680" HorizontalAlignment="Stretch" Spacing="20" Margin="0,24">
-        <Border Classes="surface" BorderBrush="{DynamicResource Brush.Divider}" BorderThickness="1" Padding="32">
-          <StackPanel Spacing="16" HorizontalAlignment="Center">
-            <PathIcon Data="{StaticResource Icon.File}" Width="40" Height="40" Foreground="{DynamicResource Brush.Accent}" />
-            <TextBlock Classes="section" Text="选择视频或音频" HorizontalAlignment="Center" />
-            <TextBlock Classes="muted" Text="将一个文件拖到此页面，或点击下方按钮选择。" HorizontalAlignment="Center" />
-            <Button Content="选择文件…" Command="{Binding ChooseMediaCommand}" HorizontalAlignment="Center" Classes="accent" />
-          </StackPanel>
-        </Border>
-        <StackPanel Spacing="8" IsEnabled="{Binding CanConfigure}">
-          <TextBlock Text="文件路径" />
-          <TextBox Text="{Binding InputPath}" Watermark="视频或音频的完整路径" AutomationProperties.Name="文件路径" />
-          <TextBlock Classes="muted" Text="{Binding MediaSummary}" />
-        </StackPanel>
-        <TextBlock Classes="muted" Text="支持常见音视频格式，每次处理一个文件。" />
-        <Button Content="语音识别设置" Command="{Binding ConfigureSpeechCommand}" HorizontalAlignment="Left" />
-      </StackPanel>
-    </ScrollViewer>
-    <ScrollViewer Grid.Row="3" IsVisible="{Binding IsOptionsStep}" HorizontalScrollBarVisibility="Disabled">
-      <StackPanel MaxWidth="680" HorizontalAlignment="Stretch" Spacing="8">
-        <Border Classes="surface" Padding="16">
-          <Grid ColumnDefinitions="*,Auto">
-            <TextBlock FontWeight="SemiBold" Text="{Binding FileName}" TextWrapping="Wrap" />
-            <TextBlock Grid.Column="1" Classes="muted" Text="{Binding MediaSummary}" Margin="16,0,0,0" />
-          </Grid>
-        </Border>
-        <StackPanel Spacing="8" IsEnabled="{Binding CanConfigure}">
-          <Grid ColumnDefinitions="*,16,*" RowDefinitions="Auto,Auto">
-            <TextBlock Text="源语言" Margin="0,0,0,8" />
-            <ComboBox x:Name="SourceLanguageBox" Grid.Row="1" SelectedItem="{Binding TaskSourceLanguage}" ItemsSource="{Binding SourceLanguageNames}" HorizontalAlignment="Stretch" AutomationProperties.Name="本次源语言" />
-            <TextBlock Grid.Column="2" Text="目标语言" Margin="0,0,0,8" />
-            <TextBox Grid.Row="1" Grid.Column="2" Text="{Binding TaskTargetLanguage}" AutomationProperties.Name="本次目标语言" />
-          </Grid>
-          <TextBlock Classes="muted" Text="源语言同时用于语音识别和翻译；不确定时选择自动识别。" />
-          <TextBlock Text="翻译引擎" />
-          <ComboBox ItemsSource="{Binding ProviderNames}" SelectedIndex="{Binding TaskProviderIndex}" HorizontalAlignment="Stretch" AutomationProperties.Name="本次翻译引擎" />
-        </StackPanel>
-        <StackPanel Spacing="8" IsEnabled="{Binding CanConfigure}">
-          <TextBlock Text="本次字幕管线" />
-          <ComboBox x:Name="TaskPipelineSelector" ItemsSource="{Binding TaskPipelineItems}" SelectedItem="{Binding TaskPipeline}" HorizontalAlignment="Stretch" AutomationProperties.Name="本次字幕管线" />
-        </StackPanel>
-        <Grid ColumnDefinitions="*,Auto">
-          <TextBlock Classes="muted" Text="{Binding TaskServiceSummary}" TextWrapping="Wrap" />
-          <StackPanel Grid.Column="1" Spacing="8" Orientation="Horizontal"><Button Content="服务设置" Command="{Binding ConfigureTranslationCommand}" /><Button Content="编辑管线" Command="{Binding ConfigurePromptCommand}" /></StackPanel>
-        </Grid>
-      </StackPanel>
-    </ScrollViewer>
-    <Grid Grid.Row="3" RowDefinitions="Auto,Auto,*" IsVisible="{Binding IsResultsStep}">
-      <Border Classes="surface" Margin="0,0,0,16">
-        <Grid ColumnDefinitions="*,Auto">
-          <StackPanel Spacing="8"><TextBlock FontWeight="SemiBold" Text="{Binding FileName}" TextWrapping="Wrap" /><TextBlock Text="{Binding Status}" /><ProgressBar IsIndeterminate="True" IsVisible="{Binding IsProcessing}" Height="4" /></StackPanel>
-          <StackPanel Grid.Column="1" Spacing="8" Margin="16,0,0,0" VerticalAlignment="Center"><TextBlock Classes="muted" Text="{Binding ResultSummary}" /><TextBlock Classes="muted" Text="{Binding CueSelectionSummary}" IsVisible="{Binding HasCueSelection}" /><Button Content="重新翻译所选字幕" Command="{Binding RetryCueCommand}" /></StackPanel>
+    <Grid x:Name="MediaColumns" Grid.Row="1" ColumnDefinitions="190,5,*">
+      <Border Background="{DynamicResource Brush.Surface}" CornerRadius="8" Padding="8">
+        <Grid RowDefinitions="Auto,*,Auto">
+          <TextBlock Text="媒体" FontWeight="SemiBold" Margin="8,2,0,8" />
+          <ListBox x:Name="MediaList" Grid.Row="1" ItemsSource="{Binding MediaTasks}" SelectedItem="{Binding SelectedMedia}" Background="Transparent" AutomationProperties.Name="媒体列表">
+            <ListBox.ItemTemplate><DataTemplate x:DataType="vm:MediaTaskItem"><Grid ColumnDefinitions="Auto,*" Margin="0,6"><CheckBox IsChecked="{Binding IsChecked}" VerticalAlignment="Top" AutomationProperties.Name="加入批量范围" /><StackPanel Grid.Column="1" Spacing="4"><TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Name}" FontWeight="SemiBold" /><TextBlock Classes="muted" Text="{Binding Detail}" FontSize="12" /><TextBlock Text="{Binding StatusText}" FontSize="12" /></StackPanel></Grid></DataTemplate></ListBox.ItemTemplate>
+          </ListBox>
+          <StackPanel Grid.Row="2" Spacing="6" Margin="0,6,0,0"><Button Content="继续批量处理…" Command="{Binding Workspace.ResumeBatchCommand}" IsVisible="{Binding Workspace.HasInterruptedBatch}" IsEnabled="{Binding CanManageProject}" /><Button Content="撤销删除" Command="{Binding Workspace.UndoRemoveCommand}" IsVisible="{Binding Workspace.HasRemovedMedia}" IsEnabled="{Binding CanManageProject}" /></StackPanel>
         </Grid>
       </Border>
-      <Grid Grid.Row="1" ColumnDefinitions="140,*,*" Margin="12,0,12,8">
-        <TextBlock Classes="muted" Text="序号 / 时间" VerticalAlignment="Center" />
-        <TextBlock Grid.Column="1" Classes="muted" Text="原文" VerticalAlignment="Center" />
-        <TextBlock Grid.Column="2" Classes="muted" Text="译文" VerticalAlignment="Center" />
+      <GridSplitter x:Name="MediaSplitter" Grid.Column="1" ResizeDirection="Columns" Background="Transparent" />
+      <Grid Grid.Column="2" Margin="16,0,0,0" RowDefinitions="Auto,Auto,*" IsVisible="{Binding HasMedia}">
+        <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,12">
+          <StackPanel Margin="0,0,12,0" VerticalAlignment="Center"><TextBlock Text="{Binding FileName}" FontSize="16" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding InputPath}" /><TextBlock Text="{Binding CurrentMediaSettings}" Classes="muted" FontSize="11" TextTrimming="CharacterEllipsis" /></StackPanel>
+          <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6"><Button x:Name="MediaSettingsButton" Content="处理设置…" Command="{Binding Workspace.SettingsCommand}" IsEnabled="{Binding CanConfigure}" /><Button Content="重新定位文件…" Command="{Binding Workspace.LocateCommand}" IsEnabled="{Binding CanManageProject}" /><Button Content="删除" Foreground="{DynamicResource Brush.Error}" Command="{Binding Workspace.RemoveCommand}" IsEnabled="{Binding CanManageProject}" /></StackPanel>
+        </Grid>
+        <TextBlock Grid.Row="1" Text="源文件未找到" Classes="error" IsVisible="{Binding Workspace.SourceMissing}" Margin="0,0,0,8" />
+        <views:WorkspaceResultsView x:Name="Results" Grid.Row="2" DataContext="{Binding Workspace}" />
       </Grid>
-      <ListBox x:Name="CueList" Grid.Row="2" ItemsSource="{Binding Rows}" Selection="{Binding CueSelection}" SelectionMode="Multiple" AutomationProperties.Name="原文与译文对照">
-        <ListBox.ItemTemplate>
-          <DataTemplate x:DataType="vm:CueRow">
-            <Grid ColumnDefinitions="140,*,*" Margin="0,10">
-              <StackPanel Spacing="4"><TextBlock Text="{Binding Number}" /><TextBlock Classes="muted" FontSize="12" Text="{Binding Time}" TextWrapping="Wrap" /></StackPanel>
-              <TextBlock Grid.Column="1" Text="{Binding Source}" TextWrapping="Wrap" Margin="0,0,20,0" />
-              <TextBlock Grid.Column="2" Classes.error="{Binding IsFailed}" Text="{Binding Translation}" TextWrapping="Wrap" />
-            </Grid>
-          </DataTemplate>
-        </ListBox.ItemTemplate>
-      </ListBox>
-      <StackPanel Grid.Row="2" IsVisible="{Binding !HasRows}" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="12">
-        <TextBlock Classes="section" Text="{Binding Status}" HorizontalAlignment="Center" />
-        <TextBlock Classes="muted" Text="识别完成后，字幕会显示在这里。" />
-      </StackPanel>
+      <StackPanel Grid.Column="2" IsVisible="{Binding !HasMedia}" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="12"><TextBlock Text="添加第一个媒体" FontSize="20" FontWeight="SemiBold" /><TextBlock Text="选择音频或视频，也可以拖入文件。" Classes="muted" /><Button Content="添加媒体…" Command="{Binding AddMediaCommand}" Classes="accent" HorizontalAlignment="Center" /></StackPanel>
     </Grid>
-    <StackPanel Grid.Row="4">
-      <views:PreparationStatusView x:Name="WorkspacePreparation" />
-      <TextBlock x:Name="UploadNotice" Classes="muted" IsVisible="{Binding IsOptionsStep}" Text="音频上传至 ElevenLabs；云端翻译会发送字幕原文，可能产生费用。" TextWrapping="Wrap" Margin="0,12,0,0" />
-      <Grid ColumnDefinitions="*,Auto" Margin="0,20,0,0">
-        <StackPanel Orientation="Horizontal" Spacing="12">
-          <Button Content="上一步" Command="{Binding FileStepCommand}" IsVisible="{Binding IsOptionsStep}" />
-          <Button Content="调整选项" Command="{Binding OptionsStepCommand}" IsVisible="{Binding IsResultsStep}" />
-          <Button Content="新建任务" Command="{Binding NewTaskCommand}" IsVisible="{Binding IsResultsStep}" />
-        </StackPanel>
-        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="12">
-          <Button Content="取消" Command="{Binding CancelCommand}" IsVisible="{Binding IsBusy}" />
-          <Button x:Name="NextButton" Content="下一步" Command="{Binding NextStepCommand}" IsVisible="{Binding IsFileStep}" Classes="accent" />
-          <Button x:Name="RunButton" Content="{Binding RunButtonText}" Command="{Binding RunCommand}" IsVisible="{Binding IsOptionsStep}" Classes="accent" />
-          <Button Content="继续处理" Command="{Binding RunCommand}" IsVisible="{Binding ShowResume}" />
-          <Button x:Name="ExportButton" Content="导出 SRT…" Command="{Binding ExportCommand}" IsVisible="{Binding IsResultsStep}" Classes="accent" />
-        </StackPanel>
-      </Grid>
-    </StackPanel>
   </Grid>
 </UserControl>

@@ -24,7 +24,7 @@ public interface ILlamaServerSession : IAsyncDisposable
     Task<LocalCompletion> CompleteAsync(string prompt, IProgress<int>? progress, CancellationToken token);
     Task<LocalCompletion> CompleteAsync(string prompt, TranslationRequest request, IProgress<int>? progress, CancellationToken token)
     {
-        if (request.Grammar is not null || request.Parameters != new InferenceParameters())
+        if (request.OutputContract is not null || request.Parameters != new InferenceParameters())
             throw new NotSupportedException("本地推理会话不支持所选管线的阶段参数或约束生成。");
         return CompleteAsync(prompt, progress, token);
     }

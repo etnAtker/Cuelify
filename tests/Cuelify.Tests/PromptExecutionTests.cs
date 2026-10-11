@@ -113,6 +113,8 @@ public sealed class PromptExecutionTests
     private sealed class Session : ILlamaServerSession
     {
         private readonly ConcurrentDictionary<string, TranslationRequest> _prepared = new();
+        public Task<LocalCompletion> CompleteAsync(string prompt, TranslationRequest request, IProgress<int>? progress, CancellationToken token)
+            => CompleteAsync(prompt, progress, token);
         public ConcurrentQueue<TranslationRequest> Requests { get; } = new();
         public int Capacity = 100;
         public int Completions;

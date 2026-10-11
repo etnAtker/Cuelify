@@ -115,12 +115,12 @@ public sealed class TimelineTests
     }
 
     [Fact]
-    public void MergingAcrossAnOverlappingSpeakerStillOrdersCuesByStartTime()
+    public void ZeroDurationWordsDoNotBridgeAcrossAnotherSpeaker()
     {
         var cues = new CueBuilder().Build([W("你", 0, 0, "a"), W("是", .1, .3, "b"), W("好", .4, .8, "a")]);
-        Assert.Equal(2, cues.Count); Assert.Equal("你好", cues[0].SourceText);
+        Assert.Equal(3, cues.Count); Assert.Equal("你", cues[0].SourceText);
         Assert.Equal(S(0), cues[0].Start); Assert.Equal(S(.1), cues[1].Start);
-        Assert.Contains("你好", SrtSerializer.SerializeSource(cues));
+        Assert.Equal("是", cues[1].SourceText); Assert.Equal("好", cues[2].SourceText);
     }
 
     [Fact]

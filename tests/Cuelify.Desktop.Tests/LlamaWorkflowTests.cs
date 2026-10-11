@@ -20,12 +20,12 @@ public sealed class LlamaWorkflowTests
         Assert.Equal(4, settings.TranslationConcurrency); Assert.Equal(2, settings.LocalConcurrency);
         Assert.Equal(fixture.Store.DefaultLlamaServerPath, settings.LlamaServerPath);
         settings.Provider = TranslationProvider.Local;
-        Assert.Equal(1, settings.TranslationSettings().BatchSize); Assert.Equal(2, settings.TranslationSettings().Concurrency);
+        Assert.Equal(25, settings.TranslationSettings().BatchSize); Assert.Equal(2, settings.TranslationSettings().Concurrency);
         settings.TranslationConcurrency = 1;
         await fixture.Store.SaveAsync(settings, []);
         var loaded = await fixture.Store.LoadAsync();
         Assert.Equal(1, loaded!.TranslationConcurrency); Assert.Equal(2, loaded.LocalConcurrency);
-        Assert.Equal(SubtitlePipelinePresets.Direct, loaded.GetPipeline());
+        Assert.Equal(SubtitlePipelinePresets.TwoStage.Id, loaded.GetPipeline().Id);
         Assert.Equal(fixture.Store.DefaultLlamaServerPath, loaded.LlamaServerPath);
     }
 

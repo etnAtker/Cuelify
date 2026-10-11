@@ -50,7 +50,7 @@ public sealed record TranslationRequest(IReadOnlyList<SubtitleCue> Cues, IReadOn
     // 裁剪参考内容后从模板重建，不能按字符切断渲染后的指令或当前字幕。
     public TranslationPromptContext? PromptContext { get; init; }
     public InferenceParameters Parameters { get; init; } = new();
-    public string? Grammar { get; init; }
+    public GenerationOutputContract? OutputContract { get; init; }
 }
 public sealed record TranslationResponse(string Content);
 public interface ITranslationEngine
@@ -63,6 +63,7 @@ public interface ITranslationEngine
 public sealed record AlignmentResult(IReadOnlyDictionary<string, string> Translations, IReadOnlyList<string> FailedIds);
 public sealed record TranslationResult(IReadOnlyList<SubtitleCue> Cues, IReadOnlyList<string> FailedIds, int EngineCalls, int CacheHits)
 {
+    public IReadOnlyList<SourceWordRange> Ranges { get; init; } = [];
     public IReadOnlyDictionary<string, string> FailureReasons { get; init; } = new Dictionary<string, string>();
     public bool IsComplete => FailedIds.Count == 0;
 }

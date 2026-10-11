@@ -13,6 +13,10 @@ public partial class MainWindowViewModel
     private string _compatibleKey = "";
     private string _deepSeekKey = "";
     private string _compatibleAddress = "";
+    private bool _loadingCredentials;
+    private long _credentialEditRevision;
+    private long _credentialSavedRevision;
+    private Task<bool> _credentialSave = Task.FromResult(true);
     [ObservableProperty] private bool isCredentialBusy;
     [ObservableProperty] private string credentialStatus = "";
     public bool HasMasterPassword => _credentials.HasMasterPassword;
@@ -27,9 +31,10 @@ public partial class MainWindowViewModel
         get => Settings.Provider == TranslationProvider.Compatible ? _compatibleKey : Settings.Provider == TranslationProvider.DeepSeek ? _deepSeekKey : "";
         set
         {
+            if (TranslationKey == value) return;
             if (Settings.Provider == TranslationProvider.Compatible) { _compatibleKey = value; _compatibleAddress = Address(Settings.BaseUrl); }
             else if (Settings.Provider == TranslationProvider.DeepSeek) _deepSeekKey = value;
-            ResetEngineStatus(); CredentialStatus = "有未保存的密钥修改。"; OnPropertyChanged(); RefreshCommands();
+            ResetEngineStatus(); MarkCredentialsChanged(); OnPropertyChanged(); RefreshCommands();
         }
     }
     public bool NeedsAddressConfirmation => IsCompatible && !string.IsNullOrWhiteSpace(_compatibleKey) && _compatibleAddress != Address(Settings.BaseUrl);
@@ -45,8 +50,23 @@ public partial class MainWindowViewModel
     public bool ShowResume => CanContinue && IsResultsStep && !IsBusy;
     private string SpeechCredentialHint => !HasMasterPassword ? "请先设置主密码。" : !IsUnlocked ? "请先解锁已保存的密钥。" :
         string.IsNullOrWhiteSpace(ElevenLabsKey) ? "尚未填写 ElevenLabs API 密钥。" : "";
-    private string RunCredentialHint => string.Join(" ", new[] { SpeechCredentialHint,
-        IsUnlocked ? TranslationCredentialHint((TranslationProvider)TaskProviderIndex, _savedSettings.BaseUrl) : "" }.Where(value => value.Length > 0));
+    private string RunCredentialHint
+    {
+        get
+        {
+            var task = SelectedMedia?.Document;
+            AppSettings settings;
+            try { settings = TaskSettings(); }
+            catch (ArgumentException) { settings = _taskOptionBase ?? _savedSettings; }
+            var needsAsr = task is null || !task.Asr.IsReady || ProjectTaskService.ConfigurationChanged(task.Chunking, Core.Projects.TaskStage.Chunking, settings) ||
+                ProjectTaskService.ConfigurationChanged(task.Asr, Core.Projects.TaskStage.Asr, settings);
+            var needsTranslation = task is null || !task.Translation.IsReady || needsAsr ||
+                ProjectTaskService.ConfigurationChanged(task.Subtitles, Core.Projects.TaskStage.Subtitles, settings) ||
+                ProjectTaskService.ConfigurationChanged(task.Translation, Core.Projects.TaskStage.Translation, settings);
+            return string.Join(" ", new[] { needsAsr ? SpeechCredentialHint : "",
+                needsTranslation ? TranslationCredentialHint((TranslationProvider)TaskProviderIndex, settings.BaseUrl) : "" }.Where(v => v.Length > 0));
+        }
+    }
     private string TranslationCredentialHint(TranslationProvider provider, string address)
     {
         if (provider == TranslationProvider.Local) return "";
@@ -58,7 +78,12 @@ public partial class MainWindowViewModel
     private static string Address(string value) => Uri.TryCreate(value.Trim(), UriKind.Absolute, out var uri) ? uri.AbsoluteUri.TrimEnd('/') : value.Trim().TrimEnd('/');
     private string KeyFor(TranslationProvider provider) => provider switch { TranslationProvider.Compatible => _compatibleKey, TranslationProvider.DeepSeek => _deepSeekKey, _ => "" };
     private IEnumerable<string> Secrets => new[] { ElevenLabsKey, _compatibleKey, _deepSeekKey, _credentials.Values.ElevenLabs, _credentials.Values.Compatible, _credentials.Values.DeepSeek };
-    partial void OnElevenLabsKeyChanged(string value) { CredentialStatus = "有未保存的密钥修改。"; RefreshCommands(); }
+    partial void OnElevenLabsKeyChanged(string value) { MarkCredentialsChanged(); RefreshCommands(); }
+    private void MarkCredentialsChanged()
+    {
+        if (_loadingCredentials) return;
+        _credentialEditRevision++; CredentialStatus = "有未保存的密钥修改。";
+    }
     partial void OnIsCredentialBusyChanged(bool value) => RefreshCommands();
 
     private void RefreshCredentialCommands()
@@ -70,7 +95,11 @@ public partial class MainWindowViewModel
     private void LoadCredentials()
     {
         var values = _credentials.Values;
-        ElevenLabsKey = values.ElevenLabs; _compatibleKey = values.Compatible; _deepSeekKey = values.DeepSeek; _compatibleAddress = values.CompatibleAddress;
+        _loadingCredentials = true;
+        try { ElevenLabsKey = values.ElevenLabs; _compatibleKey = values.Compatible; _deepSeekKey = values.DeepSeek; _compatibleAddress = values.CompatibleAddress; }
+        finally { _loadingCredentials = false; }
+        _credentialSavedRevision = _credentialEditRevision;
+        _credentialSave = Task.FromResult(true);
         ResetEngineStatus(); RefreshCommands();
     }
 
@@ -87,22 +116,47 @@ public partial class MainWindowViewModel
     });
 
     [RelayCommand(CanExecute = nameof(CanEditCredentials))]
-    private void LockCredentials()
-    { if (!CanEditCredentials) return; _credentials.Lock(); LoadCredentials(); CredentialStatus = "密钥已锁定。"; }
+    private async Task LockCredentialsAsync()
+    {
+        if (!CanEditCredentials) return;
+        var saving = SaveCredentialDraftAsync(); IsCredentialBusy = true;
+        try
+        {
+            if (!await saving) return;
+            _credentials.Lock(); LoadCredentials(); CredentialStatus = "密钥已锁定。";
+        }
+        finally { IsCredentialBusy = false; }
+    }
 
     [RelayCommand(CanExecute = nameof(CanEditCredentials))]
-    private Task SaveCredentialsAsync() => CredentialOperationAsync(async token =>
+    private async Task SaveCredentialsAsync() => await SaveCredentialDraftAsync();
+    internal Task<bool> SaveCredentialDraftAsync()
     {
-        if (NeedsAddressConfirmation) throw new InvalidOperationException("请先确认兼容服务密钥对应的新地址。");
-        await _credentials.SaveAsync(new(ElevenLabsKey, _compatibleKey, _deepSeekKey, _compatibleAddress), token);
-        CredentialStatus = "密钥已加密保存。";
-    });
+        if (!IsUnlocked || _credentialSavedRevision == _credentialEditRevision) return _credentialSave;
+        if (IsBusy || IsCredentialBusy || _disposed) return Task.FromResult(false);
+        var values = new CredentialValues(ElevenLabsKey, _compatibleKey, _deepSeekKey, _compatibleAddress);
+        var revision = _credentialEditRevision; var previous = _credentialSave;
+        return _credentialSave = SaveCredentialSnapshotAsync(previous, values, revision, NeedsAddressConfirmation);
+    }
+    private async Task<bool> SaveCredentialSnapshotAsync(Task<bool> previous, CredentialValues values, long revision, bool needsConfirmation)
+    {
+        await previous;
+        try
+        {
+            if (needsConfirmation) throw new InvalidOperationException("请先确认兼容服务密钥对应的新地址。");
+            await _credentials.SaveAsync(values, CancellationToken.None);
+            _credentialSavedRevision = revision;
+            CredentialStatus = revision == _credentialEditRevision ? "密钥已加密保存。" : "有未保存的密钥修改。";
+            ResumePendingWorkspaceAction(); return true;
+        }
+        catch (Exception exception) { CredentialStatus = CredentialErrorMessages.FromException(exception); return false; }
+    }
 
     [RelayCommand(CanExecute = nameof(CanConfirmAddress))]
     private async Task ConfirmCompatibleAddressAsync()
     {
         if (await _dialogs.ConfirmAsync("确认将已有兼容服务密钥用于当前服务地址？后续请求会将密钥发送至该地址。") && CanConfirmAddress)
-        { _compatibleAddress = Address(Settings.BaseUrl); CredentialStatus = "有未保存的密钥修改。"; ResetEngineStatus(); RefreshCommands(); }
+        { _compatibleAddress = Address(Settings.BaseUrl); MarkCredentialsChanged(); ResetEngineStatus(); RefreshCommands(); await SaveCredentialDraftAsync(); }
     }
 
     [RelayCommand(CanExecute = nameof(CanEditCredentials))]
@@ -127,8 +181,8 @@ public partial class MainWindowViewModel
     }
     private async Task GuardCredentialAsync(Func<CancellationToken, Task> action)
     {
-        try { await action(_credentialCancellation.Token); }
+        try { await _credentialSave; await action(_credentialCancellation.Token); }
         catch (Exception exception) { CredentialStatus = CredentialErrorMessages.FromException(exception); }
-        finally { IsCredentialBusy = false; }
+        finally { IsCredentialBusy = false; ResumePendingWorkspaceAction(); }
     }
 }

@@ -82,6 +82,13 @@ public sealed class PromptBuilder
     {
         Validate(profile);
         settings.Validate();
+        return BuildValidated(profile, settings, cues, context, following);
+    }
+
+    // 编排入口已验证不可变配置；同一任务的各批次和参考裁剪无需再次验证。
+    public TranslationRequest BuildValidated(PromptProfile profile, TranslationSettings settings, IReadOnlyList<SubtitleCue> cues,
+        IReadOnlyList<SubtitleCue> context, IReadOnlyList<SubtitleCue>? following = null)
+    {
         if (cues.Count == 0 || (profile.OutputFormat == TranslationOutputFormat.PlainText && cues.Count != 1))
             throw new ArgumentException("请求字幕条数与输出协议不符。");
         var contextItems = context.TakeLast(settings.ContextCues).Select(cue => new { Source = cue.SourceText, Translation = cue.TranslatedText }).ToList();
@@ -117,7 +124,8 @@ public sealed class PromptBuilder
         return new(cues, messages)
         {
             PromptContext = new(profile, settings, context.TakeLast(contextItems.Count).ToArray(), followingItems), Parameters = profile.Parameters,
-            Grammar = profile.MaximumTextCharacters is { } grammarMaximum && profile.BatchTranslation ? PipelineTranslationGrammar.Build(cues, grammarMaximum) : null
+            OutputContract = new() { Kind = GenerationOutputKind.Translation, Format = profile.OutputFormat,
+                CueIds = cues.Select(c => c.Id).ToArray(), MaximumTextCharacters = profile.MaximumTextCharacters }
         };
     }
 }

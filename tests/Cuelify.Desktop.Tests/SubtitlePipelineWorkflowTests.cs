@@ -4,6 +4,7 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using Cuelify.Core.Translation;
 using Cuelify.Desktop.Services;
 using Cuelify.Desktop.ViewModels;
@@ -24,25 +25,23 @@ public sealed class SubtitlePipelineWorkflowTests
         try
         {
             await model.InitializeCommand.ExecuteAsync(null);
-            model.Settings.Theme = theme; model.InputPath = "fixture.mp4"; model.Step = WorkflowStep.Options;
+            model.Settings.Theme = theme; await model.AddMediaPathsAsync(["fixture.mp4"]); model.ShowWorkspaceCommand.Execute(null); model.Workspace.SettingsCommand.Execute(null);
             await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Background);
             window.UpdateLayout();
-            var selector = window.FindControl<WorkspaceView>("WorkspacePage")!.FindControl<ComboBox>("TaskPipelineSelector")!;
-            Assert.True(selector.IsEffectivelyVisible); Assert.Equal(3, selector.ItemCount);
+            var selector = window.GetVisualDescendants().OfType<WorkspaceDialogView>().Single().FindControl<ComboBox>("MediaPipelineSelector")!;
+            Assert.True(selector.IsEffectivelyVisible); Assert.Equal(2, selector.ItemCount);
             selector.SetCurrentValue(SelectingItemsControl.SelectedItemProperty, SubtitlePipelinePresets.TwoStage);
             await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Background);
-            Assert.Equal(SubtitlePipelinePresets.TwoStage, model.TaskPipeline); Assert.Equal(SubtitlePipelinePresets.Joint, model.Settings.GetPipeline());
+            Assert.Equal(SubtitlePipelinePresets.TwoStage, model.Workspace.PipelineDraft); Assert.Equal(SubtitlePipelinePresets.TwoStage, model.Settings.GetPipeline());
             Assert.True(selector.Bounds.Width > 200);
-            var notice = window.FindControl<WorkspaceView>("WorkspacePage")!.FindControl<TextBlock>("UploadNotice")!;
-            Assert.True(notice.IsEffectivelyVisible);
-            var run = window.FindControl<WorkspaceView>("WorkspacePage")!.FindControl<Button>("RunButton")!;
-            Assert.True(notice.TranslatePoint(new Point(0, notice.Bounds.Height), window)!.Value.Y <= run.TranslatePoint(default, window)!.Value.Y);
+            var save = window.GetVisualDescendants().OfType<WorkspaceDialogView>().Single().FindControl<Button>("ConfirmWorkspaceDialog")!;
+            Assert.True(save.IsEffectivelyVisible); Assert.True(save.TranslatePoint(default, window)!.Value.Y + save.Bounds.Height <= height);
             window.UpdateLayout(); AvaloniaHeadlessPlatform.ForceRenderTimerTick(2);
             using var frame = window.CaptureRenderedFrame(); Assert.NotNull(frame);
             var output = Environment.GetEnvironmentVariable("CUELIFY_UI_ARTIFACTS");
             if (!string.IsNullOrWhiteSpace(output)) { Directory.CreateDirectory(output); frame!.Save(Path.Combine(output, $"task-pipeline-{width}-{theme}.png")); }
         }
-        finally { window.Close(); }
+        finally { model.Workspace.CloseDialogCommand.Execute(null); window.Close(); }
     }
 
     [Theory]
@@ -62,14 +61,14 @@ public sealed class SubtitlePipelineWorkflowTests
             Assert.Equal(pipeline, snapshot.GetPipeline()); Assert.Equal(original, settings.GetPipeline().Id);
         }
         settings.LocalModelId = "index-translate-9b-q4km"; settings.Provider = TranslationProvider.Local;
-        Assert.Equal(SubtitlePipelinePresets.TwoStage.Id, settings.GetPipeline().Id);
+        Assert.Equal(original, settings.GetPipeline().Id);
     }
 
     [Fact]
     public void InvalidEffectiveCloudStageIsRejectedBeforeProcessing()
     {
-        var custom = SubtitlePipelinePresets.Joint with { Id = "invalid-thinking-stage", Name = "阶段参数测试",
-            Segmentation = SubtitlePipelinePresets.Joint.Segmentation with { Parameters = new() { TopP = .8 } } };
+        var custom = SubtitlePipelinePresets.TwoStage with { Id = "invalid-thinking-stage", Name = "阶段参数测试",
+            Segmentation = SubtitlePipelinePresets.TwoStage.Segmentation with { Parameters = new() { TopP = .8 } } };
         var settings = new AppSettings { Provider = TranslationProvider.DeepSeek, ThinkingEnabled = true, TaskPipelineId = custom.Id };
         settings.SavePipeline(custom);
         Assert.Contains("top_p", Assert.Throws<ArgumentException>(() => ConfigurationStore.Validate(settings)).Message);
@@ -83,32 +82,32 @@ public sealed class SubtitlePipelineWorkflowTests
         model.InputPath = "fixture.mp4";
         await model.RunCommand.ExecuteAsync(null);
         Assert.True(model.CanExport); Assert.Equal(SubtitlePipelinePresets.TwoStage.Id, fixture.Jobs.GenerationSettings!.GetPipeline().Id);
-        Assert.Equal(SubtitlePipelinePresets.TwoStage.Id, fixture.Jobs.LastSettings!.GetPipeline().Id);
-        Assert.Equal(SubtitlePipelinePresets.Joint.Id, model.Settings.GetPipeline().Id);
+        Assert.Equal(SubtitlePipelinePresets.TwoStage.Id, fixture.Jobs.LastSettings!.GetPipeline().Id.Replace("snapshot:", ""));
+        Assert.Equal(SubtitlePipelinePresets.TwoStage.Id, model.Settings.GetPipeline().Id);
     }
 
     [AvaloniaFact]
-    public async Task JointResultSkipsSecondTranslationAndRetryKeepsOriginalTaskPipeline()
+    public async Task IndependentResultAlwaysTranslatesAndRetryKeepsOriginalTaskPipeline()
     {
-        using var fixture = new Fixture(); fixture.Jobs.JointComplete = true;
+        using var fixture = new Fixture();
         await using var model = fixture.Model(); model.InputPath = "fixture.mp4";
         await model.RunCommand.ExecuteAsync(null);
-        Assert.True(model.CanExport); Assert.Null(fixture.Jobs.LastSettings);
-        Assert.All(model.Rows, r => Assert.Equal("联合译文", r.Translation));
-        model.AssociatedPipeline = SubtitlePipelinePresets.Direct;
+        Assert.True(model.CanExport); Assert.NotNull(fixture.Jobs.LastSettings);
+        Assert.All(model.Rows, r => Assert.Equal("中文译文", r.Translation));
+        model.DefaultPipeline = SubtitlePipelinePresets.Direct;
         await model.SaveSettingsCommand.ExecuteAsync(null);
         await model.PreviewRequestCommand.ExecuteAsync(null);
         model.CueSelection.Select(1); await model.RetryCueCommand.ExecuteAsync(null);
-        Assert.Equal(SubtitlePipelinePresets.Joint.Id, fixture.Jobs.PreviewSettings!.GetPipeline().Id);
-        Assert.Equal(SubtitlePipelinePresets.Joint.Id, fixture.Jobs.LastSettings!.GetPipeline().Id);
-        Assert.Equal("联合译文", model.Rows[0].Translation); Assert.Equal("中文译文", model.Rows[1].Translation);
+        Assert.Equal(SubtitlePipelinePresets.TwoStage.Id, fixture.Jobs.PreviewSettings!.GetPipeline().Id.Replace("snapshot:", ""));
+        Assert.Equal(SubtitlePipelinePresets.TwoStage.Id, fixture.Jobs.LastSettings!.GetPipeline().Id.Replace("snapshot:", ""));
+        Assert.Equal("中文译文", model.Rows[0].Translation); Assert.Equal("中文译文", model.Rows[1].Translation);
         Assert.Equal(FakeJobs.Cues[1].Start, model.Rows[1].Cue.Start);
     }
 
     [AvaloniaFact]
-    public async Task ContinueAfterJointRetranslationFailureDoesNotRegenerateOrRestoreOldTranslation()
+    public async Task ContinueAfterRetranslationFailureDoesNotRegenerateOrRestoreOldTranslation()
     {
-        using var fixture = new Fixture(); fixture.Jobs.JointComplete = true;
+        using var fixture = new Fixture();
         await using var model = fixture.Model(); model.InputPath = "fixture.mp4";
         await model.RunCommand.ExecuteAsync(null);
         model.CueSelection.Select(1); fixture.Jobs.Partial = true;
@@ -127,14 +126,14 @@ public sealed class SubtitlePipelineWorkflowTests
         using var fixture = new Fixture(); await using var model = fixture.Model();
         model.SelectedPipeline = SubtitlePipelinePresets.TwoStage;
         model.CopyPromptCommand.Execute(null); var id = model.SelectedPipeline!.Id;
-        model.PipelineModeIndex = 1; model.SegmentationTemperature = "0.2"; model.TranslationTemperature = "0";
+        model.SegmentationMethodIndex = 1; model.SegmentationTemperature = "0.2"; model.TranslationTemperature = "0";
         model.PipelineLineCharacters = 20; model.PipelineBlockSeconds = 30;
         await model.SaveSettingsCommand.ExecuteAsync(null);
         Assert.Empty(model.Error);
         var saved = (await fixture.Store.LoadAsync())!.FindPipeline(id);
-        Assert.Equal(SubtitlePipelineMode.JointSegmentationTranslation, saved.Mode);
+        Assert.Equal(SegmentationMethod.Model, saved.Method);
         Assert.Equal(.2, saved.Segmentation.Parameters.Temperature); Assert.Equal(0, saved.TranslationParameters.Temperature);
         Assert.Equal(20, saved.LineCharacters); Assert.Equal(30, saved.BlockSeconds);
-        Assert.Equal(SubtitlePipelinePresets.Joint.Id, model.Settings.GetPipeline().Id);
+        Assert.Equal(SubtitlePipelinePresets.TwoStage.Id, model.Settings.GetPipeline().Id);
     }
 }

@@ -19,16 +19,16 @@ public sealed class EmbeddedModelPromptTests
     private static SubtitlePipelineProfile Custom(string name = "我的管线") => SubtitlePipelinePresets.Direct with { Id = Guid.NewGuid().ToString("N"), Name = name };
 
     [Fact]
-    public void LibraryHasThreeBuiltInsAndModelDefaultsAreReferences()
+    public void LibraryHasTwoBuiltInsAndModelsDoNotSelectPipelines()
     {
         var settings = new AppSettings();
-        Assert.Equal(3, settings.AllPipelines.Count()); Assert.Empty(settings.PipelineLibrary);
-        Assert.Equal(SubtitlePipelinePresets.Joint, settings.GetPipeline());
+        Assert.Equal(2, settings.AllPipelines.Count()); Assert.Empty(settings.PipelineLibrary);
+        Assert.Equal(SubtitlePipelinePresets.TwoStage, settings.GetPipeline());
         settings.Provider = TranslationProvider.Local;
-        Assert.Equal(SubtitlePipelinePresets.Direct, settings.GetPipeline());
+        Assert.Equal(SubtitlePipelinePresets.TwoStage, settings.GetPipeline());
         settings.LocalModelId = EmbeddedModelCatalog.Presets[1].Id;
         Assert.Equal(SubtitlePipelinePresets.TwoStage, settings.GetPipeline());
-        Assert.Throws<ArgumentException>(() => settings.SavePipeline(SubtitlePipelinePresets.Joint with { Name = "覆盖内置" }));
+        Assert.Throws<ArgumentException>(() => settings.SavePipeline(SubtitlePipelinePresets.TwoStage with { Name = "覆盖内置" }));
     }
 
     [Theory]
@@ -39,13 +39,13 @@ public sealed class EmbeddedModelPromptTests
     {
         using var fixture = new Fixture(); var settings = fixture.Store.CreateDefaults();
         var custom = Custom(); settings.SavePipeline(custom);
-        settings.Provider = provider; settings.AssociatePipeline(custom.Id);
-        settings.Provider = TranslationProvider.Local; settings.LocalModelId = EmbeddedModelCatalog.Presets[1].Id; settings.AssociatePipeline(custom.Id);
+        settings.Provider = provider; settings.SetDefaultPipeline(custom.Id);
+        settings.Provider = TranslationProvider.Local; settings.LocalModelId = EmbeddedModelCatalog.Presets[1].Id; settings.SetDefaultPipeline(custom.Id);
         var snapshot = ConfigurationStore.Snapshot(settings);
         settings.SavePipeline(custom with { Name = "改名", Translation = custom.Translation with { UserTemplate = "修改规则 {source_text}" } });
         Assert.Equal("修改规则 {source_text}", settings.GetPipeline().Translation.UserTemplate);
         settings.Provider = provider; Assert.Equal("改名", settings.GetPipeline().Name);
-        Assert.Equal(custom, snapshot.GetPipeline());
+        Assert.Equal(custom.Id, snapshot.GetPipeline().Id); Assert.Equal(custom.Translation, snapshot.GetPipeline().Translation);
         await fixture.Store.SaveAsync(settings, []);
         var loaded = (await fixture.Store.LoadAsync())!;
         Assert.Single(loaded.PipelineLibrary); Assert.Equal(custom.Id, loaded.GetPipeline().Id);
@@ -53,31 +53,31 @@ public sealed class EmbeddedModelPromptTests
     }
 
     [Fact]
-    public void CloudBindingsDistinguishProviderEndpointAndModelButNormalizeEndpoint()
+    public void ModelIdentityDistinguishesEndpointAndModelWithoutChangingPipeline()
     {
         var settings = new AppSettings { Provider = TranslationProvider.Compatible, BaseUrl = "https://provider.example/v1", CloudModel = "model-a" };
-        var custom = Custom(); settings.SavePipeline(custom); settings.AssociatePipeline(custom.Id);
-        settings.BaseUrl = "https://provider.example/v1/chat/completions"; Assert.Equal(custom, settings.GetPipeline());
-        settings.CloudModel = "model-b"; Assert.Equal(SubtitlePipelinePresets.Joint, settings.GetPipeline());
-        settings.CloudModel = "model-a"; settings.BaseUrl = "https://other.example/v1"; Assert.Equal(SubtitlePipelinePresets.Joint, settings.GetPipeline());
-        settings.BaseUrl = "https://provider.example/v1"; settings.Provider = TranslationProvider.DeepSeek; Assert.Equal(SubtitlePipelinePresets.Joint, settings.GetPipeline());
+        var custom = Custom(); settings.SavePipeline(custom); settings.SetDefaultPipeline(custom.Id);
+        var identity = settings.ModelKey();
+        settings.BaseUrl = "https://provider.example/v1/chat/completions"; Assert.Equal(identity, settings.ModelKey());
+        settings.CloudModel = "model-b"; Assert.NotEqual(identity, settings.ModelKey()); Assert.Equal(custom.Id, settings.GetPipeline().Id);
+        settings.BaseUrl = "https://other.example/v1"; Assert.NotEqual(identity, settings.ModelKey()); Assert.Equal(custom.Id, settings.GetPipeline().Id);
+        settings.Provider = TranslationProvider.DeepSeek; Assert.Equal(custom.Id, settings.GetPipeline().Id);
     }
-
     [Fact]
     public void DeleteRemovesReferencesAndRestoresEachModelDefault()
     {
         var settings = new AppSettings(); var custom = Custom(); settings.SavePipeline(custom);
-        settings.AssociatePipeline(custom.Id); settings.Provider = TranslationProvider.Local; settings.AssociatePipeline(custom.Id);
-        settings.LocalModelId = EmbeddedModelCatalog.Presets[1].Id; settings.AssociatePipeline(custom.Id);
+        settings.SetDefaultPipeline(custom.Id); settings.Provider = TranslationProvider.Local; settings.SetDefaultPipeline(custom.Id);
+        settings.LocalModelId = EmbeddedModelCatalog.Presets[1].Id; settings.SetDefaultPipeline(custom.Id);
         var other = Custom("其他模板"); settings.SavePipeline(other);
-        settings.Provider = TranslationProvider.Compatible; settings.AssociatePipeline(other.Id);
+        settings.Provider = TranslationProvider.Compatible; settings.SetDefaultPipeline(other.Id);
         settings.DeletePipeline(custom.Id);
-        Assert.Single(settings.PipelineLibrary); Assert.Single(settings.ModelPipelineBindings);
+        Assert.Single(settings.PipelineLibrary); Assert.Equal(other.Id, settings.DefaultPipelineId);
         Assert.Equal(other, settings.GetPipeline());
-        settings.Provider = TranslationProvider.DeepSeek; Assert.Equal(SubtitlePipelinePresets.Joint, settings.GetPipeline());
-        settings.Provider = TranslationProvider.Local; Assert.Equal(SubtitlePipelinePresets.TwoStage, settings.GetPipeline());
-        settings.LocalModelId = EmbeddedModelCatalog.Default.Id; Assert.Equal(SubtitlePipelinePresets.Direct, settings.GetPipeline());
-        Assert.Throws<ArgumentException>(() => settings.DeletePipeline(SubtitlePipelinePresets.Joint.Id));
+        settings.Provider = TranslationProvider.DeepSeek; Assert.Equal(other.Id, settings.GetPipeline().Id);
+        settings.Provider = TranslationProvider.Local; Assert.Equal(other.Id, settings.GetPipeline().Id);
+        settings.DeletePipeline(other.Id); Assert.Equal(SubtitlePipelinePresets.TwoStage.Id, settings.DefaultPipelineId);
+        Assert.Throws<ArgumentException>(() => settings.DeletePipeline(SubtitlePipelinePresets.TwoStage.Id));
     }
 
     [Theory]
@@ -98,7 +98,7 @@ public sealed class EmbeddedModelPromptTests
     {
         using var fixture = new Fixture(); var settings = fixture.Store.CreateDefaults(); await fixture.Store.SaveAsync(settings, []);
         var file = Path.Combine(fixture.Root, "settings.json"); var previous = await File.ReadAllTextAsync(file);
-        settings.ModelPipelineBindings["other-model"] = new("其他模型", "missing-template");
+        settings.PipelineModelDefaults["missing-template"] = [];
         await Assert.ThrowsAsync<ArgumentException>(() => fixture.Store.SaveAsync(settings, []));
         Assert.Equal(previous, await File.ReadAllTextAsync(file));
     }
@@ -110,13 +110,13 @@ public sealed class EmbeddedModelPromptTests
         await model.InitializeCommand.ExecuteAsync(null);
         model.CopyPromptCommand.Execute(null); Assert.True(model.CanEditPrompt); Assert.True(model.HasPromptEdits);
         await model.SavePromptCommand.ExecuteAsync(null); Assert.Empty(model.Error); Assert.Single(model.Settings.PipelineLibrary);
-        var copyId = model.SelectedPipeline!.Id; Assert.NotEqual(SubtitlePipelinePresets.Joint.Id, copyId);
+        var copyId = model.SelectedPipeline!.Id; Assert.NotEqual(SubtitlePipelinePresets.TwoStage.Id, copyId);
         model.NewPromptCommand.Execute(null); Assert.NotEmpty(model.PromptValidationError);
         model.ProfileName = "空白新建"; model.UserTemplate = "译成中文 {source_text}";
         await model.SavePromptCommand.ExecuteAsync(null); Assert.Empty(model.Error); Assert.Equal(2, model.Settings.PipelineLibrary.Count);
         model.ProfileName = "重命名"; await model.SavePromptCommand.ExecuteAsync(null);
         Assert.Equal("重命名", (await fixture.Store.LoadAsync())!.FindPipeline(model.SelectedPipeline!.Id).Name);
-        Assert.Equal(SubtitlePipelinePresets.Joint.Translation.UserTemplate, model.Settings.FindPipeline(SubtitlePipelinePresets.Joint.Id).Translation.UserTemplate);
+        Assert.Equal(SubtitlePipelinePresets.TwoStage.Translation.UserTemplate, model.Settings.FindPipeline(SubtitlePipelinePresets.TwoStage.Id).Translation.UserTemplate);
     }
 
     [AvaloniaFact]
@@ -129,10 +129,10 @@ public sealed class EmbeddedModelPromptTests
         fixture.Dialogs.SwitchChoice = PromptSwitchChoice.Save;
         model.SelectedPipeline = SubtitlePipelinePresets.Direct; await model.PromptSwitchTask;
         Assert.Empty(model.Error); Assert.Equal(SubtitlePipelinePresets.Direct.Id, model.SelectedPipeline.Id); Assert.Equal("待保存", model.Settings.FindPipeline(copyId).Name);
-        Assert.Equal(SubtitlePipelinePresets.Joint.Id, model.AssociatedPipeline!.Id);
+        Assert.Equal(SubtitlePipelinePresets.TwoStage.Id, model.DefaultPipeline!.Id);
         model.CopyPromptCommand.Execute(null); var discarded = model.SelectedPipeline!.Id;
         fixture.Dialogs.SwitchChoice = PromptSwitchChoice.Discard;
-        model.SelectedPipeline = SubtitlePipelinePresets.Joint; await model.PromptSwitchTask;
+        model.SelectedPipeline = SubtitlePipelinePresets.TwoStage; await model.PromptSwitchTask;
         Assert.False(model.HasPromptEdits); Assert.False(model.Settings.PipelineLibrary.ContainsKey(discarded));
     }
 
@@ -148,7 +148,7 @@ public sealed class EmbeddedModelPromptTests
         fixture.Dialogs.Confirm = false; await model.DeletePromptCommand.ExecuteAsync(null);
         Assert.Equal(id, model.SelectedPipeline.Id); Assert.True(model.HasPromptEdits);
         fixture.Dialogs.Confirm = true; await model.DeletePromptCommand.ExecuteAsync(null);
-        Assert.Equal(SubtitlePipelinePresets.Joint, model.SelectedPipeline); Assert.False(model.HasPromptEdits);
+        Assert.Equal(SubtitlePipelinePresets.TwoStage, model.SelectedPipeline); Assert.False(model.HasPromptEdits);
         Assert.DoesNotContain(model.VisiblePipelineItems, profile => profile.Id == id);
         Assert.Empty(model.Settings.PipelineLibrary); Assert.False(File.Exists(Path.Combine(fixture.Root, "settings.json")));
         Assert.Equal(45, model.Settings.TimeoutSeconds); Assert.True(model.HasUnsavedSettings); Assert.False(model.CanDeletePrompt);
@@ -245,9 +245,9 @@ public sealed class EmbeddedModelPromptTests
         await model.SavePromptCommand.ExecuteAsync(null); Assert.NotEmpty(model.Error); Assert.Empty(model.Settings.PipelineLibrary);
         model.UserTemplate = "返回 ID 对应译文 JSON {cues_json}"; model.PromptBatchSize = 3;
         await model.SavePromptCommand.ExecuteAsync(null); Assert.Empty(model.Error);
-        model.AssociatedPipeline = model.SelectedPipeline;
+        model.DefaultPipeline = model.SelectedPipeline;
         Assert.Equal(3, model.Settings.TranslationSettings().BatchSize); Assert.Equal(4, model.Settings.TranslationSettings().Concurrency);
-        model.ProviderIndex = (int)TranslationProvider.Local; model.AssociatedPipeline = model.SelectedPipeline;
+        model.ProviderIndex = (int)TranslationProvider.Local; model.DefaultPipeline = model.SelectedPipeline;
         Assert.Equal(3, model.Settings.TranslationSettings().BatchSize); Assert.Equal(2, model.Settings.TranslationSettings().Concurrency);
     }
 
@@ -256,15 +256,15 @@ public sealed class EmbeddedModelPromptTests
     {
         using var fixture = new Fixture(); await using var model = fixture.Model();
         model.CopyPromptCommand.Execute(null); await model.SavePromptCommand.ExecuteAsync(null);
-        var id = model.SelectedPipeline!.Id; model.AssociatedPipeline = model.SelectedPipeline;
-        model.ProviderIndex = (int)TranslationProvider.Local; model.AssociatedPipeline = model.SelectedPipeline;
-        model.SelectedEmbeddedModel = EmbeddedModelCatalog.Presets[1]; model.AssociatedPipeline = model.SelectedPipeline;
+        var id = model.SelectedPipeline!.Id; model.DefaultPipeline = model.SelectedPipeline;
+        model.ProviderIndex = (int)TranslationProvider.Local; model.DefaultPipeline = model.SelectedPipeline;
+        model.SelectedEmbeddedModel = EmbeddedModelCatalog.Presets[1]; model.DefaultPipeline = model.SelectedPipeline;
         fixture.Dialogs.Confirm = false; await model.DeletePromptCommand.ExecuteAsync(null);
-        Assert.Contains("各自的默认管线", fixture.Dialogs.ConfirmationMessage); Assert.Single(model.Settings.PipelineLibrary);
+        Assert.Contains("新媒体的默认管线", fixture.Dialogs.ConfirmationMessage); Assert.Single(model.Settings.PipelineLibrary);
         fixture.Dialogs.Confirm = true; await model.DeletePromptCommand.ExecuteAsync(null);
         Assert.Empty(model.Error); var loaded = (await fixture.Store.LoadAsync())!;
-        Assert.Empty(loaded.PipelineLibrary); Assert.Empty(loaded.ModelPipelineBindings);
-        Assert.Equal(SubtitlePipelinePresets.TwoStage.Id, model.AssociatedPipeline!.Id);
+        Assert.Empty(loaded.PipelineLibrary); Assert.Equal(SubtitlePipelinePresets.TwoStage.Id, loaded.DefaultPipelineId);
+        Assert.Equal(SubtitlePipelinePresets.TwoStage.Id, model.DefaultPipeline!.Id);
         Assert.DoesNotContain(model.PipelineItems, profile => profile.Id == id);
     }
 
@@ -272,10 +272,10 @@ public sealed class EmbeddedModelPromptTests
     public async Task TestUsesAssociatedTemplateRatherThanEditorAndIgnoresInvalidUnusedDraft()
     {
         using var fixture = new Fixture(); await using var model = fixture.Model();
-        model.ProviderIndex = (int)TranslationProvider.Local; model.SelectedPipeline = SubtitlePipelinePresets.Joint;
+        model.ProviderIndex = (int)TranslationProvider.Local; model.SelectedPipeline = SubtitlePipelinePresets.TwoStage;
         model.CopyPromptCommand.Execute(null); model.UserTemplate = "无效的未保存草稿";
         await model.TestEngineCommand.ExecuteAsync(null); Assert.Empty(model.Error);
-        Assert.Equal(SubtitlePipelinePresets.Direct, fixture.Jobs.EngineSettings!.GetPipeline());
+        Assert.Equal(SubtitlePipelinePresets.TwoStage.Id, fixture.Jobs.EngineSettings!.GetPipeline().Id);
         var bad = Custom("无效的其他模板") with { Translation = PromptPresets.SingleSimple with { UserTemplate = "缺少变量" } }; model.Settings.PipelineLibrary[bad.Id] = bad;
         await model.TestEngineCommand.ExecuteAsync(null); Assert.Empty(model.Error);
         Assert.Contains("无效的其他模板", Assert.Throws<ArgumentException>(() => ConfigurationStore.Validate(model.Settings)).Message);
@@ -286,7 +286,7 @@ public sealed class EmbeddedModelPromptTests
     {
         using var fixture = new Fixture(); await using var model = fixture.Model();
         model.ProviderIndex = (int)TranslationProvider.Local; model.SelectedPipeline = SubtitlePipelinePresets.Direct; model.CopyPromptCommand.Execute(null);
-        model.UserTemplate = "原模板 {source_text}"; await model.SavePromptCommand.ExecuteAsync(null); model.AssociatedPipeline = model.SelectedPipeline;
+        model.UserTemplate = "原模板 {source_text}"; await model.SavePromptCommand.ExecuteAsync(null); model.DefaultPipeline = model.SelectedPipeline;
         var file = Path.Combine(fixture.Root, "test.gguf"); await File.WriteAllTextAsync(file, "GGUF测试"); model.Settings.ModelPath = file;
         await model.SaveSettingsCommand.ExecuteAsync(null); model.TaskProviderIndex = (int)TranslationProvider.Local; model.InputPath = "fixture.mp4";
         await model.RunCommand.ExecuteAsync(null); Assert.True(model.CanExport);
@@ -309,7 +309,7 @@ public sealed class EmbeddedModelPromptTests
             await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Background);
             var view = window.FindControl<SettingsView>("SettingsPage")!;
             var library = view.FindControl<ListBox>("PipelineLibraryList")!;
-            Assert.Equal(3, library.ItemCount); Assert.Equal(model.SelectedPipeline, library.SelectedItem);
+            Assert.Equal(2, library.ItemCount); Assert.Equal(model.SelectedPipeline, library.SelectedItem);
             Assert.True(view.FindControl<TextBox>("PromptNameEditor")!.IsReadOnly);
             Assert.False(view.FindControl<CheckBox>("BatchTranslationToggle")!.IsEnabled);
             CapturePromptUi(window, $"prompt-body-{width}-{theme}.png");
@@ -317,6 +317,11 @@ public sealed class EmbeddedModelPromptTests
             await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Background);
             Assert.True(view.FindControl<TextBox>("PromptUserEditor")!.IsEffectivelyVisible);
             Assert.True(view.FindControl<TextBox>("PromptUserEditor")!.IsReadOnly);
+            window.UpdateLayout();
+            var systemEditor = view.FindControl<TextBox>("PromptSystemEditor")!;
+            var userEditor = view.FindControl<TextBox>("PromptUserEditor")!;
+            Assert.True(systemEditor.TranslatePoint(new Point(0, systemEditor.Bounds.Height), window)!.Value.Y <
+                userEditor.TranslatePoint(default, window)!.Value.Y);
             CapturePromptUi(window, $"pipeline-translation-{width}-{theme}.png");
             model.PipelineEditingStage = 0;
             model.PromptSectionIndex = 1;
@@ -326,7 +331,7 @@ public sealed class EmbeddedModelPromptTests
             Assert.True(view.FindControl<TextBox>("PromptUserPreviewBox")!.IsReadOnly);
             CapturePromptUi(window, $"prompt-preview-{width}-{theme}.png");
             model.PromptSectionIndex = 0;
-            model.PromptSearch = "先分句"; Assert.Single(model.VisiblePipelineItems); model.PromptSearch = "";
+            model.PromptSearch = "模型分句"; Assert.Single(model.VisiblePipelineItems); model.PromptSearch = "";
             await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Background);
             Assert.Equal(model.SelectedPipeline, library.SelectedItem);
             library.SetCurrentValue(SelectingItemsControl.SelectedItemProperty, SubtitlePipelinePresets.Direct);
@@ -341,7 +346,8 @@ public sealed class EmbeddedModelPromptTests
             Assert.True(delete.IsEnabled); Assert.Same(model.DeletePromptCommand, delete.Command); more.Flyout.Hide();
             var editor = view.FindControl<TextBox>("PromptUserEditor")!;
             Assert.True(editor.Bounds.Height >= 80);
-            var editorBottom = editor.TranslatePoint(new Point(0, editor.Bounds.Height), window)!.Value;
+            var promptScroll = view.FindControl<ScrollViewer>("TranslationPromptScroll")!;
+            var editorBottom = promptScroll.TranslatePoint(new Point(0, promptScroll.Bounds.Height), window)!.Value;
             var saveTop = view.FindControl<Button>("SettingsSaveButton")!.TranslatePoint(default, window)!.Value;
             Assert.True(editorBottom.Y <= saveTop.Y);
             view.FindControl<TextBox>("PromptNameEditor")!.SetCurrentValue(TextBox.TextProperty, "界面自定义模板");
@@ -349,7 +355,7 @@ public sealed class EmbeddedModelPromptTests
             await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Background);
             fixture.Dialogs.SwitchCompletion = new(TaskCreationOptions.RunContinuationsAsynchronously);
             var draft = model.SelectedPipeline;
-            library.SetCurrentValue(SelectingItemsControl.SelectedItemProperty, SubtitlePipelinePresets.Joint);
+            library.SetCurrentValue(SelectingItemsControl.SelectedItemProperty, SubtitlePipelinePresets.TwoStage);
             Assert.Equal(draft, library.SelectedItem); Assert.Equal(draft, model.SelectedPipeline);
             await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Background);
             Assert.Equal(1, fixture.Dialogs.SwitchConfirmations);

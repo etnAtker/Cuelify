@@ -7,10 +7,11 @@ namespace Cuelify.Infrastructure.Translation;
 
 public sealed record TranslationProgress(string Stage, IReadOnlyList<string> CueIds)
 {
+    public IReadOnlyDictionary<string, Cuelify.Core.Projects.ProcessingState>? UnitStates { get; init; }
     public IReadOnlyList<SubtitleCue>? Cues { get; init; }
     public IReadOnlyList<string>? FailedIds { get; init; }
 }
-public sealed class TranslationOrchestrator(ITranslationEngine engine, string? cacheRoot = null)
+public sealed class TranslationOrchestrator(ITranslationEngine engine, string? cacheRoot = null, string? fallbackCacheRoot = null)
 {
     private readonly string _cacheRoot = cacheRoot ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Cuelify", "Translations");
 
@@ -27,8 +28,12 @@ public sealed class TranslationOrchestrator(ITranslationEngine engine, string? c
         _ = SrtSerializer.SerializeSource(cues); // 付费前校验输入 ID、顺序及时间戳。
         var indices = cues.Select((cue, index) => (cue.Id, index)).ToDictionary(item => item.Id, item => item.index, StringComparer.Ordinal);
         if (forceCueIds?.Any(id => !indices.ContainsKey(id)) == true) throw new ArgumentException("定向重翻包含未知 cue ID。");
-        var identity = AtomicFile.Hash(new { engine.CacheIdentity, Prompt = profile.ExecutionIdentity, settings.BatchSize, settings.MaximumBatchCharacters, settings.SourceLanguage, settings.TargetLanguage, settings.TargetStyle,
-            Input = cues.Select(cue => new { cue.Id, cue.Start, cue.End, cue.SourceText }).ToArray(), Schema = "translation-v2" });
+        if (previousCues is not null && (previousCues.Count != cues.Count || previousCues.Where((cue, index) =>
+            cue.Id != cues[index].Id || cue.Start != cues[index].Start || cue.End != cues[index].End || cue.SourceText != cues[index].SourceText).Any()))
+            throw new InvalidDataException("已有译文与输入字幕不一致。");
+        var seed = previousCues?.ToDictionary(c => c.Id);
+        var identity = AtomicFile.Hash(new { engine.CacheIdentity, Prompt = profile.ExecutionIdentity, settings.BatchSize, settings.MaximumBatchCharacters, settings.SourceLanguage, settings.TargetLanguage, settings.TargetStyle, settings.ContextCues, settings.FollowingContextCues, settings.MaximumContextCharacters,
+            Input = cues.Select(cue => new { cue.Id, cue.Start, cue.End, cue.SourceText }).ToArray(), Schema = "translation-v3" });
         var directory = Path.Combine(_cacheRoot, identity);
         Directory.CreateDirectory(directory);
         await using var jobLock = new FileStream(Path.Combine(directory, "translation.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
@@ -36,17 +41,18 @@ public sealed class TranslationOrchestrator(ITranslationEngine engine, string? c
         var failures = new ConcurrentDictionary<string, string>(StringComparer.Ordinal);
         int calls = 0, hits = 0;
         var builder = new PromptBuilder();
-        var batches = Plan(cues, settings);
+        var batches = PlanValidated(cues, settings);
+        progress?.Report(new("Translating", []) { UnitStates = cues.ToDictionary(c => c.Id, _ => Cuelify.Core.Projects.ProcessingState.NotStarted) });
         if (forceCueIds?.Count == 0) forceCueIds = null;
         try
         {
             if (forceCueIds is not null)
             {
-                var previous = await AtomicFile.ReadJsonAsync<TranslationResult>(Path.Combine(directory, "result.json"), cancellationToken)
-                    ?? (previousCues is null ? throw new InvalidOperationException("定向重翻需要当前翻译配置的已有结果；首次处理请执行正常翻译。") :
-                        new TranslationResult(previousCues, [], 0, 0));
-                if (previous.Cues is null || previous.Cues.Count != cues.Count || previous.Cues.Where((cue, index) =>
-                    cue.Id != cues[index].Id || cue.Start != cues[index].Start || cue.End != cues[index].End || cue.SourceText != cues[index].SourceText).Any())
+                var previous = previousCues is not null ? new TranslationResult(previousCues, [], 0, 0) :
+                    await AtomicFile.ReadJsonAsync<TranslationResult>(Path.Combine(directory, "result.json"), cancellationToken)
+                    ?? throw new InvalidOperationException("定向重翻需要当前翻译配置的已有结果；首次处理请执行正常翻译。");
+                if (previousCues is null && (previous.Cues is null || previous.Cues.Count != cues.Count || previous.Cues.Where((cue, index) =>
+                    cue.Id != cues[index].Id || cue.Start != cues[index].Start || cue.End != cues[index].End || cue.SourceText != cues[index].SourceText).Any()))
                     throw new InvalidDataException("定向重翻的原有结果与输入字幕不一致。");
                 foreach (var cue in previous.Cues.Where(cue => !forceCueIds.Contains(cue.Id)))
                 {
@@ -91,7 +97,7 @@ public sealed class TranslationOrchestrator(ITranslationEngine engine, string? c
             snapshot.Take(indices[cue.Id]).TakeLast(settings.ContextCues).ToArray();
         IReadOnlyList<SubtitleCue> Following(IReadOnlyList<SubtitleCue> batch, IReadOnlyList<SubtitleCue> snapshot) =>
             snapshot.Skip(indices[batch[^1].Id] + 1).Take(settings.FollowingContextCues).Select(cue => cue with { TranslatedText = null }).ToArray();
-        string RequestPath(TranslationRequest request) => Path.Combine(directory, "batch-" + AtomicFile.Hash(new { request.Cues, request.Messages }) + ".json");
+        string RequestPath(TranslationRequest request) => Path.Combine(directory, "batch-" + AtomicFile.Hash(new { request.Cues, request.Messages, request.Parameters, request.OutputContract }) + ".json");
         bool Forced(string id) => forceCueIds?.Contains(id) == true;
 
         async Task ProcessAndReport(IReadOnlyList<SubtitleCue> batch, IReadOnlyList<SubtitleCue> snapshot)
@@ -111,17 +117,14 @@ public sealed class TranslationOrchestrator(ITranslationEngine engine, string? c
         {
             if (forceCueIds is not null) batch = batch.Where(cue => Forced(cue.Id)).ToArray();
             if (batch.Count == 0) return;
-            var request = builder.Build(profile, settings, batch, Context(batch[0], snapshot), Following(batch, snapshot));
+            var request = builder.BuildValidated(profile, settings, batch, Context(batch[0], snapshot), Following(batch, snapshot));
             var path = RequestPath(request);
             var accepted = await ReadCache(path, batch);
             foreach (var cue in batch.Where(cue => Forced(cue.Id))) accepted.Remove(cue.Id);
             foreach (var item in accepted) translations[item.Key] = item.Value;
             Interlocked.Add(ref hits, accepted.Count);
-            if (forceCueIds is null && previousCues is not null)
+            if (forceCueIds is null && seed is not null)
             {
-                if (previousCues.Count != cues.Count || previousCues.Where((c, i) => c.Id != cues[i].Id || c.Start != cues[i].Start || c.End != cues[i].End || c.SourceText != cues[i].SourceText).Any())
-                    throw new InvalidDataException("管线已有译文与最终字幕不一致。");
-                var seed = previousCues.ToDictionary(c => c.Id);
                 foreach (var cue in batch.Where(c => !accepted.ContainsKey(c.Id) && Valid(seed[c.Id].TranslatedText)))
                 { accepted[cue.Id] = seed[cue.Id].TranslatedText!; translations[cue.Id] = seed[cue.Id].TranslatedText!; }
                 if (accepted.Count > 0) await AtomicFile.WriteJsonAsync(path, new CachedTranslations(accepted), CancellationToken.None);
@@ -181,7 +184,7 @@ public sealed class TranslationOrchestrator(ITranslationEngine engine, string? c
 
         async Task TranslateOne(SubtitleCue cue, IReadOnlyList<SubtitleCue> snapshot, int attempts)
         {
-            var request = builder.Build(profile, settings, [cue], Context(cue, snapshot), Following([cue], snapshot));
+            var request = builder.BuildValidated(profile, settings, [cue], Context(cue, snapshot), Following([cue], snapshot));
             var path = RequestPath(request);
             if (!Forced(cue.Id))
             {
@@ -241,6 +244,8 @@ public sealed class TranslationOrchestrator(ITranslationEngine engine, string? c
         async Task<Dictionary<string, string>> ReadCache(string path, IReadOnlyList<SubtitleCue> batch)
         {
             var cached = await AtomicFile.ReadJsonAsync<CachedTranslations>(path, cancellationToken);
+            if (cached is null && fallbackCacheRoot is not null && forceCueIds is null)
+                cached = await AtomicFile.ReadJsonAsync<CachedTranslations>(Path.Combine(fallbackCacheRoot, identity, Path.GetFileName(path)), cancellationToken);
             if (cached is null) return new(StringComparer.Ordinal);
             var expected = batch.ToDictionary(cue => cue.Id, StringComparer.Ordinal);
             if (cached.Translations is null || cached.Translations.Any(item => !expected.ContainsKey(item.Key) || !Valid(item.Value)))
@@ -249,19 +254,20 @@ public sealed class TranslationOrchestrator(ITranslationEngine engine, string? c
         }
         Task Status(string stage, CancellationToken token) => AtomicFile.WriteJsonAsync(Path.Combine(directory, "status.json"),
             new { Stage = stage, EngineCalls = calls, CacheHits = hits, Failures = failures.OrderBy(item => item.Key).ToArray() }, token);
-        bool Valid(string? text) => text is not null && AlignmentValidator.IsValid(text) &&
-            (profile.MaximumTextCharacters is null || PipelineDisplay.CharacterCount(text) <= profile.MaximumTextCharacters);
-        AlignmentResult Parse(string content, IReadOnlyList<SubtitleCue> expected)
-        {
-            var parsed = AlignmentValidator.Parse(content, expected, profile.OutputFormat);
-            var accepted = parsed.Translations.Where(item => Valid(item.Value)).ToDictionary(item => item.Key, item => item.Value);
-            return new(accepted, expected.Where(c => !accepted.ContainsKey(c.Id)).Select(c => c.Id).ToArray());
-        }
+        GenerationOutputContract Contract(IReadOnlyList<SubtitleCue> expected) => new()
+        { Kind = GenerationOutputKind.Translation, Format = profile.OutputFormat, CueIds = expected.Select(c => c.Id).ToArray(), MaximumTextCharacters = profile.MaximumTextCharacters };
+        bool Valid(string? text) => Contract([]).IsValidText(text);
+        AlignmentResult Parse(string content, IReadOnlyList<SubtitleCue> expected) => Contract(expected).Align(content);
+
     }
 
     public static IReadOnlyList<IReadOnlyList<SubtitleCue>> Plan(IReadOnlyList<SubtitleCue> cues, TranslationSettings settings)
     {
         settings.Validate();
+        return PlanValidated(cues, settings);
+    }
+    private static IReadOnlyList<IReadOnlyList<SubtitleCue>> PlanValidated(IReadOnlyList<SubtitleCue> cues, TranslationSettings settings)
+    {
         var result = new List<IReadOnlyList<SubtitleCue>>();
         var batch = new List<SubtitleCue>();
         var characters = 0;
