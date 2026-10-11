@@ -102,9 +102,9 @@
               <TextBlock Text="模型文件路径" />
               <TextBox Text="{Binding Settings.ModelPath}" AutomationProperties.Name="模型文件路径" />
             </StackPanel>
-            <TextBlock Text="关联提示词" />
-            <ComboBox x:Name="AssociatedPromptSelector" ItemsSource="{Binding PromptItems}" SelectedItem="{Binding AssociatedPrompt}" HorizontalAlignment="Stretch" AutomationProperties.Name="模型关联提示词" />
-            <Button Content="查看模板" Command="{Binding ViewAssociatedPromptCommand}" />
+            <TextBlock Text="默认字幕管线" />
+            <ComboBox x:Name="AssociatedPipelineSelector" ItemsSource="{Binding PipelineItems}" SelectedItem="{Binding AssociatedPipeline}" HorizontalAlignment="Stretch" AutomationProperties.Name="模型默认字幕管线" />
+            <Button Content="查看管线" Command="{Binding ViewAssociatedPipelineCommand}" />
             <TextBlock Classes="section" Text="推理参数" Margin="0,8,0,0" />
             <TextBlock Text="并发请求数" />
             <NumericUpDown x:Name="InferenceConcurrency" Value="{Binding InferenceConcurrency}" Minimum="1" Maximum="8" FormatString="0" ParsingNumberStyle="Integer" AutomationProperties.Name="并发请求数" AutomationProperties.HelpText="{Binding ConcurrencyHint}" />
@@ -127,12 +127,6 @@
                 <TextBlock Text="最多请求次数（含首次请求）" />
                 <NumericUpDown Value="{Binding Settings.MaximumAttempts}" Minimum="1" Maximum="5" AutomationProperties.Name="最多请求次数（含首次请求）" />
                 <TextBlock Classes="muted" Text="失败后的重试计入次数；批量译文不完整时可能拆分补翻。" TextWrapping="Wrap" />
-                <TextBlock Text="参考前文条数" />
-                <NumericUpDown Value="{Binding Settings.ContextCues}" Minimum="0" Maximum="8" AutomationProperties.Name="参考前文条数" />
-                <TextBlock Text="参考后文条数" />
-                <NumericUpDown Value="{Binding Settings.FollowingContextCues}" Minimum="0" Maximum="8" AutomationProperties.Name="参考后文条数" />
-                <TextBlock Text="参考上下文字符上限" />
-                <NumericUpDown Value="{Binding Settings.MaximumContextCharacters}" Minimum="0" Maximum="20000" AutomationProperties.Name="参考上下文字符上限" />
                 <StackPanel IsVisible="{Binding IsLocal}" Spacing="8">
                   <TextBlock Text="模型上下文容量（token）" />
                   <NumericUpDown x:Name="LocalContextSize" Value="{Binding Settings.ContextSize}" Minimum="512" Maximum="32768" Increment="512" AutomationProperties.Name="模型上下文容量（token）" />
@@ -168,15 +162,15 @@
           </StackPanel>
         </ScrollViewer>
       </TabItem>
-      <TabItem Header="提示词">
+      <TabItem Header="字幕管线">
         <Grid ColumnDefinitions="200,*" IsEnabled="{Binding CanConfigure}">
           <Grid RowDefinitions="Auto,Auto,Auto,*" Margin="0,0,16,0">
-            <TextBox x:Name="PromptSearchBox" Text="{Binding PromptSearch}" Watermark="搜索模板" AutomationProperties.Name="搜索提示词模板" />
-            <ComboBox Grid.Row="1" ItemsSource="{Binding PromptFilterNames}" SelectedIndex="{Binding PromptFilterIndex}" Margin="0,8" HorizontalAlignment="Stretch" AutomationProperties.Name="模板分类" />
-            <Button Grid.Row="2" Content="新建提示词" Command="{Binding NewPromptCommand}" Margin="0,0,0,8" />
-            <ListBox x:Name="PromptLibraryList" Grid.Row="3" ItemsSource="{Binding VisiblePromptItems}" SelectedItem="{Binding VisibleSelectedPrompt}" SelectionChanged="OnPromptSelectionChanged" AutomationProperties.Name="提示词模板列表">
+            <TextBox x:Name="PromptSearchBox" Text="{Binding PromptSearch}" Watermark="搜索管线" AutomationProperties.Name="搜索字幕管线" />
+            <ComboBox Grid.Row="1" ItemsSource="{Binding PromptFilterNames}" SelectedIndex="{Binding PromptFilterIndex}" Margin="0,8" HorizontalAlignment="Stretch" AutomationProperties.Name="管线分类" />
+            <Button Grid.Row="2" Content="新建管线" Command="{Binding NewPromptCommand}" Margin="0,0,0,8" />
+            <ListBox x:Name="PipelineLibraryList" Grid.Row="3" ItemsSource="{Binding VisiblePipelineItems}" SelectedItem="{Binding VisibleSelectedPipeline}" SelectionChanged="OnPromptSelectionChanged" AutomationProperties.Name="字幕管线列表">
               <ListBox.ItemTemplate>
-                <DataTemplate x:DataType="translation:PromptProfile">
+                <DataTemplate x:DataType="translation:SubtitlePipelineProfile">
                   <TextBlock Text="{Binding Name}" TextWrapping="Wrap" />
                 </DataTemplate>
               </ListBox.ItemTemplate>
@@ -193,15 +187,28 @@
                 <Button x:Name="MorePromptButton" Content="更多" IsVisible="{Binding !IsBuiltInPrompt}" IsEnabled="{Binding CanManagePrompts}">
                   <Button.Flyout>
                     <MenuFlyout>
-                      <MenuItem x:Name="DeletePromptMenuItem" Header="删除提示词" Command="{Binding DeletePromptCommand}" />
+                      <MenuItem x:Name="DeletePromptMenuItem" Header="删除管线" Command="{Binding DeletePromptCommand}" />
                     </MenuFlyout>
                   </Button.Flyout>
                 </Button>
               </StackPanel>
             </Grid>
             <TabControl x:Name="PromptEditorTabs" Grid.Row="1" SelectedIndex="{Binding PromptSectionIndex}">
-              <TabItem Header="正文">
-                <Grid RowDefinitions="Auto,Auto,*,Auto,1.5*,Auto">
+              <TabItem Header="步骤提示词">
+                <Grid RowDefinitions="Auto,*">
+                  <StackPanel Spacing="8" Margin="0,0,0,8">
+                    <TextBlock Classes="section" Text="{Binding PipelineSteps}" />
+                    <ComboBox ItemsSource="{Binding PipelineStageNames}" SelectedIndex="{Binding PipelineEditingStage}" IsVisible="{Binding HasSegmentationStage}" HorizontalAlignment="Stretch" AutomationProperties.Name="编辑管线步骤" />
+                  </StackPanel>
+                  <ScrollViewer Grid.Row="1" IsVisible="{Binding IsEditingSegmentation}" HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel Spacing="8">
+                      <TextBlock FontWeight="SemiBold" Text="{Binding SegmentationStageLabel}" />
+                      <TextBlock Classes="muted" Text="源文、时间和返回格式会自动加入请求。&#10;语言与风格：{source_language}、{target_language}、{target_style}&#10;参考前后文：{context_before}、{context_after}&#10;当前原文：{source_text}；词表：{words_json}；合法边界：{boundaries_json}" TextWrapping="Wrap" />
+                      <TextBlock Text="系统提示词" /><TextBox Text="{Binding SegmentationSystem}" IsReadOnly="{Binding !CanEditPrompt}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="64" AutomationProperties.Name="分句系统提示词" />
+                      <TextBlock Text="用户提示词" /><TextBox Text="{Binding SegmentationUser}" IsReadOnly="{Binding !CanEditPrompt}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="100" AutomationProperties.Name="分句用户提示词" />
+                    </StackPanel>
+                  </ScrollViewer>
+                <Grid Grid.Row="1" IsVisible="{Binding IsEditingTranslation}" RowDefinitions="Auto,Auto,*,Auto,1.5*,Auto">
                   <Button x:Name="PromptVariablesButton" Content="变量说明" HorizontalAlignment="Left" Margin="0,0,0,8">
                     <Button.Flyout>
                       <Flyout Placement="Bottom">
@@ -243,15 +250,45 @@
                   <TextBox x:Name="PromptUserEditor" Grid.Row="4" Text="{Binding UserTemplate}" IsReadOnly="{Binding !CanEditPrompt}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="80" AutomationProperties.Name="用户提示词模板" />
                   <TextBlock Grid.Row="5" Classes="error" Text="{Binding PromptContentError}" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite" />
                 </Grid>
+                </Grid>
               </TabItem>
-              <TabItem Header="模板设置">
+              <TabItem Header="管线设置">
                 <ScrollViewer HorizontalScrollBarVisibility="Disabled">
                   <StackPanel Spacing="10">
-                    <TextBlock Text="模板名称" />
-                    <TextBox x:Name="PromptNameEditor" Text="{Binding ProfileName}" IsReadOnly="{Binding !CanEditPrompt}" AutomationProperties.Name="模板名称" />
+                    <TextBlock Text="管线名称" />
+                    <TextBox x:Name="PromptNameEditor" Text="{Binding ProfileName}" IsReadOnly="{Binding !CanEditPrompt}" AutomationProperties.Name="管线名称" />
                     <TextBlock Classes="error" Text="{Binding PromptNameError}" TextWrapping="Wrap" />
                     <TextBlock Text="说明" />
-                    <TextBox Text="{Binding PromptDescription}" IsReadOnly="{Binding !CanEditPrompt}" TextWrapping="Wrap" AutomationProperties.Name="模板说明" />
+                    <TextBox Text="{Binding PromptDescription}" IsReadOnly="{Binding !CanEditPrompt}" TextWrapping="Wrap" AutomationProperties.Name="管线说明" />
+                    <TextBlock Text="处理流程" />
+                    <ComboBox ItemsSource="{Binding PipelineModeNames}" SelectedIndex="{Binding PipelineModeIndex}" IsEnabled="{Binding CanEditPrompt}" HorizontalAlignment="Stretch" AutomationProperties.Name="管线处理流程" />
+                    <TextBlock Classes="muted" Text="{Binding PipelineSteps}" />
+                    <TextBlock Classes="muted" Text="直接翻译沿用原始字幕时间；以下分句与显示时间设置适用于包含分句步骤的流程。" TextWrapping="Wrap" />
+                    <TextBlock Text="分句分块时长（秒）" /><NumericUpDown Value="{Binding PipelineBlockSeconds}" Minimum="5" Maximum="180" IsEnabled="{Binding CanEditSegmentationSettings}" AutomationProperties.Name="分句分块时长（秒）" />
+                    <TextBlock Text="分句前后参考字符数" /><NumericUpDown Value="{Binding PipelineContextCharacters}" Minimum="0" Maximum="5000" IsEnabled="{Binding CanEditSegmentationSettings}" AutomationProperties.Name="分句前后参考字符数" />
+                    <TextBlock Text="翻译参考前文条数" /><NumericUpDown Value="{Binding PipelineBeforeCues}" Minimum="0" Maximum="8" IsEnabled="{Binding CanEditPrompt}" AutomationProperties.Name="翻译参考前文条数" />
+                    <TextBlock Text="翻译参考后文条数" /><NumericUpDown Value="{Binding PipelineAfterCues}" Minimum="0" Maximum="8" IsEnabled="{Binding CanEditPrompt}" AutomationProperties.Name="翻译参考后文条数" />
+                    <TextBlock Text="翻译参考字符上限" /><NumericUpDown Value="{Binding PipelineContextBudget}" Minimum="0" Maximum="20000" IsEnabled="{Binding CanEditPrompt}" AutomationProperties.Name="翻译参考字符上限" />
+                    <TextBlock Text="最长字幕时间（秒）" /><NumericUpDown Value="{Binding PipelineMaximumSeconds}" Minimum="1" Maximum="15" IsEnabled="{Binding CanEditSegmentationSettings}" AutomationProperties.Name="最长字幕时间（秒）" />
+                    <TextBlock Text="最短显示目标（秒）" /><NumericUpDown Value="{Binding PipelineMinimumSeconds}" Minimum="0" Maximum="15" IsEnabled="{Binding CanEditSegmentationSettings}" AutomationProperties.Name="最短显示目标（秒）" />
+                    <TextBlock Text="每行字数" /><NumericUpDown Value="{Binding PipelineLineCharacters}" Minimum="5" Maximum="80" IsEnabled="{Binding CanEditPrompt}" AutomationProperties.Name="每行字数" />
+                    <TextBlock Text="阅读速度目标（字/秒）" /><NumericUpDown Value="{Binding PipelineReadingSpeed}" Minimum="1" Maximum="40" IsEnabled="{Binding CanEditPrompt}" AutomationProperties.Name="阅读速度目标（字/秒）" />
+                    <Expander Header="分句／联合阶段参数" IsVisible="{Binding HasSegmentationStage}"><StackPanel Spacing="8">
+                      <TextBlock Classes="muted" Text="留空使用模型默认值。参数支持取决于服务。" TextWrapping="Wrap" />
+                      <TextBlock Text="温度（temperature）" /><TextBox Text="{Binding SegmentationTemperature}" IsReadOnly="{Binding !CanEditPrompt}" AutomationProperties.Name="SegmentationTemperature" />
+                      <TextBlock Text="采样范围（top_p）" /><TextBox Text="{Binding SegmentationTopP}" IsReadOnly="{Binding !CanEditPrompt}" AutomationProperties.Name="SegmentationTopP" />
+                      <TextBlock Text="采样数量（top_k）" /><TextBox Text="{Binding SegmentationTopK}" IsReadOnly="{Binding !CanEditPrompt}" AutomationProperties.Name="SegmentationTopK" />
+                      <TextBlock Text="重复惩罚（repeat_penalty）" /><TextBox Text="{Binding SegmentationRepeatPenalty}" IsReadOnly="{Binding !CanEditPrompt}" AutomationProperties.Name="SegmentationRepeatPenalty" />
+                      <TextBlock Text="最大输出长度（token）" /><TextBox Text="{Binding SegmentationMaximumTokens}" IsReadOnly="{Binding !CanEditPrompt}" AutomationProperties.Name="SegmentationMaximumTokens" />
+                    </StackPanel></Expander>
+                    <Expander Header="翻译阶段参数"><StackPanel Spacing="8">
+                      <TextBlock Classes="muted" Text="留空使用模型默认值。参数支持取决于服务。" TextWrapping="Wrap" />
+                      <TextBlock Text="温度（temperature）" /><TextBox Text="{Binding TranslationTemperature}" IsReadOnly="{Binding !CanEditPrompt}" AutomationProperties.Name="TranslationTemperature" />
+                      <TextBlock Text="采样范围（top_p）" /><TextBox Text="{Binding TranslationTopP}" IsReadOnly="{Binding !CanEditPrompt}" AutomationProperties.Name="TranslationTopP" />
+                      <TextBlock Text="采样数量（top_k）" /><TextBox Text="{Binding TranslationTopK}" IsReadOnly="{Binding !CanEditPrompt}" AutomationProperties.Name="TranslationTopK" />
+                      <TextBlock Text="重复惩罚（repeat_penalty）" /><TextBox Text="{Binding TranslationRepeatPenalty}" IsReadOnly="{Binding !CanEditPrompt}" AutomationProperties.Name="TranslationRepeatPenalty" />
+                      <TextBlock Text="最大输出长度（token）" /><TextBox Text="{Binding TranslationMaximumTokens}" IsReadOnly="{Binding !CanEditPrompt}" AutomationProperties.Name="TranslationMaximumTokens" />
+                    </StackPanel></Expander>
                     <CheckBox x:Name="BatchTranslationToggle" Content="批量翻译" IsChecked="{Binding BatchTranslation}" IsEnabled="{Binding CanEditPrompt}" />
                     <StackPanel IsVisible="{Binding BatchTranslation}" IsEnabled="{Binding CanEditPrompt}" Spacing="8">
                       <TextBlock Text="每批字幕条数上限" />
@@ -260,7 +297,7 @@
                       <NumericUpDown Value="{Binding PromptMaximumBatchCharacters}" Minimum="100" Maximum="50000" AutomationProperties.Name="每批字符上限" />
                     </StackPanel>
                     <TextBlock Classes="muted" Text="{Binding PromptVariableHint}" TextWrapping="Wrap" />
-                    <Expander Header="模板使用情况">
+                    <Expander Header="管线使用情况">
                       <TextBlock Classes="muted" Text="{Binding PromptReferences}" TextWrapping="Wrap" />
                     </Expander>
                   </StackPanel>

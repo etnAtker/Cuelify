@@ -37,7 +37,7 @@ public sealed class LlamaBinaryTests
             Calls++;
             var text = command.Arguments[0] switch
             {
-                "--help" => server ? "--parallel --host --port --device --no-webui --no-kv-unified --fit --cors-origins" : "--model --device",
+                "--help" => server ? "--parallel --host --port --device --no-webui --no-kv-unified --fit --cors-origins --jinja --chat-template-kwargs" : "--model --device",
                 "--version" => "version: synthetic-test",
                 "--list-devices" => vulkan ? "Vulkan0: Synthetic GPU" : "CPU: Synthetic CPU",
                 _ => throw new InvalidOperationException()

@@ -96,6 +96,16 @@ public sealed record DeepSeekThinkingOptions(bool Enabled = false, string? Effor
 
 public static class CloudRequestBuilder
 {
+    public static JsonObject Build(CloudTranslationOptions options, TranslationRequest request, DeepSeekThinkingOptions? deepSeek = null)
+    {
+        request.Parameters.Validate();
+        var p = request.Parameters;
+        var result = Build(options with { Temperature = p.Temperature ?? options.Temperature, TopP = p.TopP ?? options.TopP,
+            MaximumTokens = p.MaximumTokens ?? options.MaximumTokens }, request.Messages, deepSeek);
+        if (p.TopK is { } k) result["top_k"] = k;
+        if (p.RepeatPenalty is { } r) result["repeat_penalty"] = r;
+        return result;
+    }
     public static JsonObject Build(CloudTranslationOptions options, IReadOnlyList<PromptMessage> messages, DeepSeekThinkingOptions? deepSeek = null)
     {
         options.Validate();

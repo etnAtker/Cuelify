@@ -150,6 +150,26 @@ public sealed class LocalServerTests
     }
 
     [Fact]
+    public async Task StageSamplingGrammarAndTokenBudgetReachLocalCompletion()
+    {
+        var stage = Request() with { Parameters = new() { Temperature = 0, TopP = 1, TopK = 40, RepeatPenalty = 1, MaximumTokens = 200 }, Grammar = "root ::= \"{}\"" };
+        using var http = new HttpClient(new Handler(async request =>
+        {
+            using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
+            Assert.Equal(0, body.RootElement.GetProperty("temperature").GetDouble());
+            Assert.Equal(1, body.RootElement.GetProperty("top_p").GetDouble());
+            Assert.Equal(40, body.RootElement.GetProperty("top_k").GetInt32());
+            Assert.Equal(1, body.RootElement.GetProperty("repeat_penalty").GetDouble());
+            Assert.Equal(200, body.RootElement.GetProperty("n_predict").GetInt32());
+            Assert.Equal(stage.Grammar, body.RootElement.GetProperty("grammar").GetString());
+            return new(HttpStatusCode.OK) { Content = new StringContent("data: {\"content\":\"{}\",\"stop\":true,\"stop_type\":\"eos\",\"tokens_predicted\":1,\"truncated\":false}\n\n", Encoding.UTF8, "text/event-stream") };
+        })) { BaseAddress = new("http://127.0.0.1/") };
+        var protocol = new LlamaServerProtocol(http, 512, 100);
+        Assert.Equal("{}", (await protocol.CompleteAsync("prepared", null, default, stage)).Content);
+        await Assert.ThrowsAsync<ArgumentException>(() => protocol.PrepareAsync(stage with { Parameters = new() { MaximumTokens = 300 } }, default));
+    }
+
+    [Fact]
     public async Task ProtocolRejectsInsufficientPerSlotContext()
     {
         using var http = new HttpClient(new Handler(_ => Task.FromResult(Json(new { total_slots = 2, default_generation_settings = new { n_ctx = 2048 } }))))

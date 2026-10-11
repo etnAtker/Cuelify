@@ -167,17 +167,17 @@ public sealed class LocalGpuAcceptanceTests
                 TranslationPromptTests.Cue("d", "We can discuss it tomorrow.", 6)
             };
             var result = await new TranslationOrchestrator(engine, Path.Combine(root, "Translations-" + Guid.NewGuid().ToString("N")))
-                .TranslateAsync(cues, PromptPresets.Get(options.Model.DefaultPromptId), new() { BatchSize = 1, Concurrency = 2 }, cancellationToken: timeout.Token);
+                .TranslateAsync(cues, PromptPresets.SingleContext, new() { BatchSize = 1, Concurrency = 2 }, cancellationToken: timeout.Token);
             Assert.True(result.IsComplete, JsonSerializer.Serialize(result.FailureReasons));
             Assert.Equal(4, result.EngineCalls); Assert.Equal(0, result.CacheHits);
             Assert.True(engine.Evidence?.HasGpuOffload); Assert.All(engine.Inferences, item => { Assert.True(item.GeneratedTokens > 0); Assert.Equal("eos", item.StopType); });
             pid = session.ProcessId; Assert.True(session.IsRunning);
-            var request = new PromptBuilder().Build(PromptPresets.Get(options.Model.DefaultPromptId), new() { BatchSize = 1 }, [cues[0]], []);
+            var request = new PromptBuilder().Build(PromptPresets.SingleContext, new() { BatchSize = 1 }, [cues[0]], []);
             var preview = await engine.PrepareAsync(request, timeout.Token);
             Assert.Contains(cues[0].SourceText, preview.Prompt); Assert.True(preview.Tokens > 0);
             cancelArmed = true;
             var longCue = TranslationPromptTests.Cue("cancel", string.Join(' ', Enumerable.Repeat("The travelers waited near the old station and talked about their journey.", 50)));
-            var longRequest = new PromptBuilder().Build(PromptPresets.Get(options.Model.DefaultPromptId), new() { BatchSize = 1 }, [longCue], []);
+            var longRequest = new PromptBuilder().Build(PromptPresets.SingleContext, new() { BatchSize = 1 }, [longCue], []);
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancelInference.Token, timeout.Token);
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() => engine.TranslateAsync(longRequest, linked.Token));
             Assert.True(cancelInference.IsCancellationRequested);

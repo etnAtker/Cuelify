@@ -22,7 +22,7 @@ public sealed class PromptVariableTests
         using var fixture = new Fixture(); await using var model = fixture.Model();
         var window = new MainWindow { DataContext = model, Width = width, Height = height }; window.Show();
         await model.InitializeCommand.ExecuteAsync(null); model.Settings.Theme = theme;
-        model.ShowSettingsCommand.Execute(null); model.SettingsSectionIndex = 2;
+        model.ShowSettingsCommand.Execute(null); model.SettingsSectionIndex = 2; model.PipelineEditingStage = 1;
         await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => { }, Avalonia.Threading.DispatcherPriority.Background);
         var settings = window.FindControl<SettingsView>("SettingsPage")!;
         var launcher = settings.FindControl<Button>("PromptVariablesButton")!;

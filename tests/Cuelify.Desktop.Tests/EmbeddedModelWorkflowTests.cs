@@ -42,7 +42,7 @@ public sealed class EmbeddedModelWorkflowTests
         Assert.Equal(previous, await File.ReadAllTextAsync(Directory.GetFiles(fixture.Root, "settings.previous-*.json").Single()));
         Assert.Equal("保留模型", await File.ReadAllTextAsync(oldPath));
         Assert.Contains("备份", fixture.Store.LastLoadNotice);
-        Assert.Empty(loaded.PromptLibrary); Assert.Equal(2, loaded.SchemaVersion);
+        Assert.Empty(loaded.PipelineLibrary); Assert.Equal(AppSettings.CurrentSchemaVersion, loaded.SchemaVersion);
     }
 
     [AvaloniaFact]
@@ -120,7 +120,7 @@ public sealed class EmbeddedModelWorkflowTests
         await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => { }, Avalonia.Threading.DispatcherPriority.Background);
         var view = window.FindControl<SettingsView>("SettingsPage")!;
         var selector = view.FindControl<ComboBox>("EmbeddedModelSelector")!;
-        Assert.Equal(2, selector.ItemCount); Assert.Equal(EmbeddedModelCatalog.Default, selector.SelectedItem);
+        Assert.Equal(3, selector.ItemCount); Assert.Equal(EmbeddedModelCatalog.Default, selector.SelectedItem);
         var button = view.FindControl<Button>("DownloadModelButton")!;
         Assert.True(button.IsEffectivelyVisible); Assert.True(button.IsEffectivelyEnabled); Assert.True(button.Bounds.Width > 0);
         var download = model.DownloadModelCommand.ExecuteAsync(null); await downloads.Started.Task;

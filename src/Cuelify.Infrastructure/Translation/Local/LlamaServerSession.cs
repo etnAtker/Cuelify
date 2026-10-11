@@ -40,6 +40,7 @@ public sealed class LlamaServerSession(EmbeddedModelOptions options, LlamaServer
         "--ctx-size", checked((long)options.ContextSize * options.Concurrency).ToString(CultureInfo.InvariantCulture),
         "--no-kv-unified", "--fit", "off", "--no-webui", "--log-colors", "off",
         "--cors-origins", "",
+        "--jinja", "--chat-template-kwargs", "{\"enable_thinking\":false}",
         "--log-verbosity", "4"
     ];
 
@@ -117,7 +118,7 @@ public sealed class LlamaServerSession(EmbeddedModelOptions options, LlamaServer
                 Evidence = VulkanEvidence.Parse(Diagnostic);
                 if (!Evidence.HasGpuOffload)
                     throw new LocalTranslationException("VulkanOffload", "本次模型加载没有有效的 Vulkan GPU 卸载记录。");
-                _protocol = new(_http, options.ContextSize, options.MaximumTokens);
+                _protocol = new(_http, options.ContextSize, options.MaximumTokens, options.Model.DefaultParameters);
                 await _protocol.ValidateCapacityAsync(options.Concurrency, timeout.Token);
                 _started = true;
                 progress?.Report(new(LocalPreparationStage.Ready));
@@ -135,6 +136,13 @@ public sealed class LlamaServerSession(EmbeddedModelOptions options, LlamaServer
     public async Task<LocalCompletion> CompleteAsync(string prompt, IProgress<int>? progress, CancellationToken token)
     {
         try { return await _protocol!.CompleteAsync(prompt, progress, token); }
+        catch (Exception exception) when (exception is HttpRequestException or IOException && !token.IsCancellationRequested)
+        { throw Failure("本地服务连接中断，请检查运行包和显存后重试。"); }
+    }
+
+    public async Task<LocalCompletion> CompleteAsync(string prompt, TranslationRequest request, IProgress<int>? progress, CancellationToken token)
+    {
+        try { return await _protocol!.CompleteAsync(prompt, progress, token, request); }
         catch (Exception exception) when (exception is HttpRequestException or IOException && !token.IsCancellationRequested)
         { throw Failure("本地服务连接中断，请检查运行包和显存后重试。"); }
     }

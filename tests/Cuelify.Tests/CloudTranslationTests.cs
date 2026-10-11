@@ -55,6 +55,27 @@ public sealed class CloudTranslationTests
 
     [Theory]
     [InlineData(true)] [InlineData(false)]
+    public async Task StageParametersOverrideServiceDefaultsInActualCloudRequest(bool official)
+    {
+        using var handler = new Handler(async (message, token) =>
+        {
+            var body = JsonNode.Parse(await message.Content!.ReadAsStringAsync(token))!.AsObject();
+            Assert.Equal(.1, body["temperature"]!.GetValue<double>());
+            if (official) Assert.False(body.ContainsKey("top_p")); // 官方非思考能力映射沿用现有契约。
+            else Assert.Equal(.9, body["top_p"]!.GetValue<double>());
+            Assert.Equal(321, body["max_tokens"]!.GetValue<int>());
+            Assert.False(body.ContainsKey("grammar"));
+            return Success("{\"ends\":[1]}");
+        });
+        using var http = new HttpClient(handler);
+        var options = Options with { BaseUrl = official ? "https://api.deepseek.com" : Options.BaseUrl, Temperature = .7, TopP = .8, MaximumTokens = 2000 };
+        ITranslationEngine engine = official ? new DeepSeekOfficialProvider(http, () => "fixture", options, new(false)) : new OpenAiCompatibleTranslationEngine(http, () => "fixture", options);
+        var stage = Request with { Parameters = new() { Temperature = .1, TopP = .9, MaximumTokens = 321 }, Grammar = "root ::= \"{}\"" };
+        Assert.Equal("{\"ends\":[1]}", (await engine.TranslateAsync(stage, default)).Content);
+    }
+
+    [Theory]
+    [InlineData(true)] [InlineData(false)]
     public void DeepSeekOnlySendsEffectiveParameters(bool thinking)
     {
         var options = Options with { BaseUrl = "https://api.deepseek.com", Temperature = .3, TopP = .95, PresencePenalty = 1, FrequencyPenalty = 1 };

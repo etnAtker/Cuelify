@@ -34,10 +34,7 @@ public partial class AppSettings : ObservableObject
     [ObservableProperty] private string thinkingEffort = "low";
     [ObservableProperty] private int timeoutSeconds = 120;
     [ObservableProperty] private int translationConcurrency = 4;
-    [ObservableProperty] private int contextCues = 5;
-    [ObservableProperty] private int followingContextCues = 2;
     [ObservableProperty] private int maximumAttempts = 3;
-    [ObservableProperty] private int maximumContextCharacters = 3000;
     [ObservableProperty] private string modelPath = "";
     [ObservableProperty] private string localModelId = "";
     [ObservableProperty] private string modelSha256 = "";
@@ -61,12 +58,13 @@ public partial class AppSettings : ObservableObject
     [ObservableProperty] private long maximumUploadBytes = 2_900_000_000;
     [ObservableProperty] private string theme = "系统";
     [ObservableProperty] private bool reduceMotion = true;
-    public const int CurrentSchemaVersion = 2;
+    public const int CurrentSchemaVersion = 3;
     public int SchemaVersion { get; init; } = CurrentSchemaVersion;
-    public Dictionary<string, PromptProfile> PromptLibrary { get; set; } = new(StringComparer.Ordinal);
-    public Dictionary<string, ModelPromptBinding> ModelPromptBindings { get; set; } = new(StringComparer.Ordinal);
+    public Dictionary<string, SubtitlePipelineProfile> PipelineLibrary { get; set; } = new(StringComparer.Ordinal);
+    public Dictionary<string, ModelPipelineBinding> ModelPipelineBindings { get; set; } = new(StringComparer.Ordinal);
     [System.Text.Json.Serialization.JsonIgnore]
-    public IEnumerable<PromptProfile> AllPrompts => PromptPresets.All.Concat(PromptLibrary.Values);
+    public IEnumerable<SubtitlePipelineProfile> AllPipelines => SubtitlePipelinePresets.All.Concat(PipelineLibrary.Values);
+    public string? TaskPipelineId { get; set; }
 
     public string ModelKey(TranslationProvider? provider = null)
     {
@@ -77,45 +75,50 @@ public partial class AppSettings : ObservableObject
     }
     public string ModelName(TranslationProvider? provider = null) => (provider ?? Provider) == TranslationProvider.Local
         ? LocalOptions().Model.Name : $"{((provider ?? Provider) == TranslationProvider.DeepSeek ? "DeepSeek" : "OpenAI 兼容服务")} · {CloudModel.Trim()} · {BaseUrl.Trim()}";
-    public PromptProfile FindPrompt(string id) => PromptPresets.All.FirstOrDefault(profile => profile.Id == id)
-        ?? PromptLibrary.GetValueOrDefault(id) ?? throw new ArgumentException("关联的提示词不存在，请重新选择提示词。");
+    public SubtitlePipelineProfile FindPipeline(string id) => AllPipelines.FirstOrDefault(p => p.Id == id)
+        ?? throw new ArgumentException("关联的字幕管线不存在，请重新选择。");
+    public SubtitlePipelineProfile GetPipeline(TranslationProvider? provider = null)
+    {
+        if (TaskPipelineId is { } task) return FindPipeline(task);
+        var selected = provider ?? Provider;
+        var fallback = selected == TranslationProvider.Local ? LocalOptions().Model.DefaultPipelineId : SubtitlePipelinePresets.Joint.Id;
+        return FindPipeline(ModelPipelineBindings.TryGetValue(ModelKey(selected), out var binding) ? binding.PipelineId : fallback);
+    }
     public PromptProfile GetProfile(TranslationProvider? provider = null)
     {
-        var selected = provider ?? Provider;
-        var fallback = selected == TranslationProvider.Local ? FindPrompt(LocalOptions().Model.DefaultPromptId) : PromptPresets.BatchSubtitles;
-        return ModelPromptBindings.TryGetValue(ModelKey(selected), out var binding) ? FindPrompt(binding.PromptId) : fallback;
+        var pipeline = GetPipeline(provider);
+        return pipeline.Translation with { Parameters = pipeline.TranslationParameters, MaximumTextCharacters = pipeline.LineCharacters * 2,
+            ReadingCharactersPerSecond = pipeline.ReadingCharactersPerSecond };
     }
-    public void AssociatePrompt(string id)
+    public void AssociatePipeline(string id)
     {
-        _ = FindPrompt(id);
-        ModelPromptBindings[ModelKey()] = new(ModelName(), id);
-        OnPropertyChanged(nameof(ModelPromptBindings));
+        _ = FindPipeline(id);
+        ModelPipelineBindings[ModelKey()] = new(ModelName(), id);
+        OnPropertyChanged(nameof(ModelPipelineBindings));
     }
-    public void SavePrompt(PromptProfile profile)
+    public void SavePipeline(SubtitlePipelineProfile profile)
     {
-        PromptBuilder.Validate(profile);
-        if (PromptPresets.IsBuiltIn(profile.Id)) throw new ArgumentException("内置模板不可修改，请先创建副本。");
-        if (AllPrompts.Any(other => other.Id != profile.Id && other.Name.Equals(profile.Name, StringComparison.OrdinalIgnoreCase)))
-            throw new ArgumentException("模板名称已存在，请使用其他名称。");
-        PromptLibrary[profile.Id] = profile;
-        OnPropertyChanged(nameof(PromptLibrary));
+        profile.Validate();
+        if (SubtitlePipelinePresets.IsBuiltIn(profile.Id)) throw new ArgumentException("内置管线不可修改，请先创建副本。");
+        if (AllPipelines.Any(other => other.Id != profile.Id && other.Name.Equals(profile.Name, StringComparison.OrdinalIgnoreCase)))
+            throw new ArgumentException("管线名称已存在，请使用其他名称。");
+        PipelineLibrary[profile.Id] = profile;
+        OnPropertyChanged(nameof(PipelineLibrary));
     }
-    public void DeletePrompt(string id)
+    public void DeletePipeline(string id)
     {
-        if (!PromptLibrary.ContainsKey(id)) throw new ArgumentException("只能删除自定义模板。");
-        var references = ModelPromptBindings.Where(item => item.Value.PromptId == id).ToArray();
-        // 移除显式关联，各模型按自己的默认模板回退。
-        foreach (var item in references) ModelPromptBindings.Remove(item.Key);
-        PromptLibrary.Remove(id);
-        OnPropertyChanged(nameof(PromptLibrary)); OnPropertyChanged(nameof(ModelPromptBindings));
+        if (!PipelineLibrary.ContainsKey(id)) throw new ArgumentException("只能删除自定义管线。");
+        foreach (var item in ModelPipelineBindings.Where(item => item.Value.PipelineId == id).ToArray()) ModelPipelineBindings.Remove(item.Key);
+        PipelineLibrary.Remove(id);
+        OnPropertyChanged(nameof(PipelineLibrary)); OnPropertyChanged(nameof(ModelPipelineBindings));
     }
     public TranslationSettings TranslationSettings() => new()
     {
         SourceLanguage = SourceLanguage, TargetLanguage = TargetLanguage, TargetStyle = TargetStyle,
         BatchSize = GetProfile().BatchTranslation ? GetProfile().BatchSize : 1,
         Concurrency = Provider == TranslationProvider.Local ? LocalConcurrency : TranslationConcurrency,
-        ContextCues = ContextCues, FollowingContextCues = FollowingContextCues, MaximumAttempts = MaximumAttempts,
-        MaximumBatchCharacters = GetProfile().BatchTranslation ? GetProfile().MaximumBatchCharacters : 50000, MaximumContextCharacters = MaximumContextCharacters
+        ContextCues = GetPipeline().BeforeCues, FollowingContextCues = GetPipeline().AfterCues, MaximumAttempts = MaximumAttempts,
+        MaximumBatchCharacters = GetProfile().BatchTranslation ? GetProfile().MaximumBatchCharacters : 50000, MaximumContextCharacters = GetPipeline().MaximumContextCharacters
     };
     public CloudTranslationOptions CloudOptions() => new()
     {
@@ -149,4 +152,4 @@ public partial class AppSettings : ObservableObject
     }
 }
 
-public sealed record ModelPromptBinding(string ModelName, string PromptId);
+public sealed record ModelPipelineBinding(string ModelName, string PipelineId);

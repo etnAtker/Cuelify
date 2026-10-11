@@ -97,6 +97,27 @@ public sealed class ModelDownloadTests
     }
 
     [Fact]
+    public async Task IndexPresetDiscoversCurrentOfficialQuantizedAsset()
+    {
+        using var directory = new TestDirectory();
+        var model = EmbeddedModelCatalog.Get("index-translate-9b-q4km");
+        using var handler = new Handler((request, _) =>
+        {
+            if (request.RequestUri!.AbsolutePath.Contains("/api/models/"))
+            {
+                Assert.Contains("IndexTeam/Index-Translate-9B-GGUF", request.RequestUri.AbsolutePath);
+                return Task.FromResult(Metadata("new-official-revision", "renamed-index-Q4_K_M.gguf"));
+            }
+            Assert.Contains("/new-official-revision/renamed-index-Q4_K_M.gguf", request.RequestUri.AbsolutePath);
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(Payload) });
+        });
+        using var http = new HttpClient(handler);
+        var result = await new ModelDownloadService(http).DownloadAsync(model, directory.File("models"), new Sink(), default);
+        Assert.Equal(Payload, await File.ReadAllBytesAsync(result.Path)); Assert.EndsWith(model.DefaultFileName, result.Path);
+        Assert.Equal(0, model.DefaultParameters.Temperature); Assert.Equal("pipeline-two-stage", model.DefaultPipelineId);
+    }
+
+    [Fact]
     public async Task ExistingCurrentFileNeedsNoDownload()
     {
         using var directory = new TestDirectory();

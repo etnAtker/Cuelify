@@ -90,4 +90,21 @@ $env:CUELIFY_LOCAL_ARTIFACTS = Join-Path (Get-Location) 'artifacts/prompt-refact
 dotnet test tests/Cuelify.Tests/Cuelify.Tests.csproj -c Release --filter 'FullyQualifiedName~IndependentTemplatesRunSingleContextAndBatchOnRealVulkan'
 ```
 
-该用例不下载运行包、不读写用户设置/凭证，以已有官方资产执行三个模板，其中批量模板要求两条字幕同一次请求成功且无补翻；记录非零 GPU 卸载、EOS、实际生成、零缓存及进程退出。7B 和线上付费请求需另行真实验收。
+该用例验证底层翻译步骤模板，不是当前管线默认值验收。不下载运行包、不读写用户设置/凭证，批量模板要求两条字幕同次请求成功且无补翻，记录实际 GPU、EOS、零缓存及释放。
+
+### 字幕管线实际验证
+
+普通回归覆盖全部模型/管线组合的配置、词覆盖与边界、阶段缓存/取消、预算和请求参数，以及任务覆盖、联合跳过第二阶段、继续处理冻结时间轴和真实 headless 编辑器。真实测试读取显式指定的已有 ASR Words 缓存，不重新调用 ElevenLabs，也不把历史 ASR 当成本轮请求。
+
+```powershell
+$env:CUELIFY_LOCAL_MODEL = '<已有 7B 或 Index GGUF 的绝对路径>'
+$env:CUELIFY_LOCAL_MODEL_ID = 'index-translate-9b-q4km' # 或 hy-mt2-7b-q4km
+$env:CUELIFY_LOCAL_SERVER = '<完整 Vulkan 包中的 llama-server.exe>'
+$env:CUELIFY_PIPELINE_WORDS = '<已有任务的 words.json 绝对路径>'
+$env:CUELIFY_LOCAL_ARTIFACTS = Join-Path (Get-Location) 'artifacts/pipelines/local'
+dotnet test tests/Cuelify.Desktop.Tests/Cuelify.Desktop.Tests.csproj -c Release --filter 'FullyQualifiedName~SubtitlePipelineGpuTests'
+```
+
+默认验收先分句后翻译，可设 CUELIFY_PIPELINE_SECONDS 限制样本；CUELIFY_PIPELINE_ID 可选择联合流程，但本地模型未必能可靠完成，失败不能当作通过。用例实际生成、导出、复用成功阶段、重翻一条并保持其余 cue/时码，还另生成一句取得服务 GPU 证据并验证释放。测试参数为每请求上下文 16384、并发 1，不代表默认 4096/并发 2 的耗时或容量结论。
+
+线上真实用例为 SubtitlePipelineCloudTests，需在测试进程显式提供 CUELIFY_PIPELINE_CLOUD_KEY 和上述词缓存/产物变量；会调用 DeepSeek 官方服务并产生费用，默认跳过。仅由已授权会话设置密钥，不能写进脚本、JSON、命令行参数或仓库。程序正常凭证流程仍不读取环境变量；此变量只属于显式验收。验收使用首 60 秒、非思考 deepseek-flash，记录联合请求、补译、缓存恢复和定向重翻。产物含原文和实际响应，保留在忽略目录，分享前检查。

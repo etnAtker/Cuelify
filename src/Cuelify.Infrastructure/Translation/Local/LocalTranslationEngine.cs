@@ -22,6 +22,12 @@ public interface ILlamaServerSession : IAsyncDisposable
     Task EnsureStartedAsync(CancellationToken token, IProgress<LocalPreparationProgress>? progress) => EnsureStartedAsync(token);
     Task<PreparedInferencePrompt> PrepareAsync(TranslationRequest request, CancellationToken token);
     Task<LocalCompletion> CompleteAsync(string prompt, IProgress<int>? progress, CancellationToken token);
+    Task<LocalCompletion> CompleteAsync(string prompt, TranslationRequest request, IProgress<int>? progress, CancellationToken token)
+    {
+        if (request.Grammar is not null || request.Parameters != new InferenceParameters())
+            throw new NotSupportedException("本地推理会话不支持所选管线的阶段参数或约束生成。");
+        return CompleteAsync(prompt, progress, token);
+    }
 }
 
 public sealed class LocalTranslationEngine : ITranslationEngine, IAsyncDisposable
@@ -49,7 +55,7 @@ public sealed class LocalTranslationEngine : ITranslationEngine, IAsyncDisposabl
         _progress = progress;
         CacheIdentity = AtomicFile.Hash(new { Provider = "llama.cpp-vulkan-server", Runtime = binary.Identity,
             options.ModelId, FileVersion = fileVersion, options.GpuLayers, options.ContextSize, options.MaximumTokens, options.Concurrency,
-            Sampling = "temperature=.7,top_p=.6,top_k=20,repeat=1.05,min_p=0,seed=42", Protocol = "local-completion-file-version-v3" });
+            Sampling = options.Model.DefaultParameters, Protocol = "local-pipeline-completion-v4" });
     }
 
     public Task WarmupAsync(CancellationToken token, IProgress<LocalPreparationProgress>? progress = null) => PrepareOperationAsync(token, progress);
@@ -70,7 +76,7 @@ public sealed class LocalTranslationEngine : ITranslationEngine, IAsyncDisposabl
             {
                 var prepared = await _session.PrepareAsync(request, timeout.Token);
                 var progress = _progress is null ? null : new Progress<int>(count => _progress.Report(new(request.Cues.Select(cue => cue.Id).ToArray(), count)));
-                var completion = await _session.CompleteAsync(prepared.Prompt, progress, timeout.Token);
+                var completion = await _session.CompleteAsync(prepared.Prompt, request, progress, timeout.Token);
                 _inferences.Enqueue(new(request.Cues.Select(cue => cue.Id).ToArray(), completion.GeneratedTokens, completion.StopType));
                 timeout.Token.ThrowIfCancellationRequested();
                 if (completion.Truncated || completion.StopType != "eos" || completion.GeneratedTokens <= 0 || string.IsNullOrWhiteSpace(completion.Content))

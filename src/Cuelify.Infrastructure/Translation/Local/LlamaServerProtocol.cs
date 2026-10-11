@@ -7,7 +7,7 @@ using Cuelify.Core.Translation;
 namespace Cuelify.Infrastructure.Translation.Local;
 
 // 预览和生成共用服务端模板、分词及同一份最终提示词。
-public sealed class LlamaServerProtocol(HttpClient http, uint contextSize, int maximumTokens)
+public sealed class LlamaServerProtocol(HttpClient http, uint contextSize, int maximumTokens, InferenceParameters? defaults = null)
 {
     public async Task ValidateCapacityAsync(int concurrency, CancellationToken token)
     {
@@ -20,8 +20,13 @@ public sealed class LlamaServerProtocol(HttpClient http, uint contextSize, int m
             throw new LocalTranslationException("ServerCapacity", "本地服务的并发数或每条上下文长度不足，请检查运行包版本和显存。");
     }
 
-    public Task<PreparedInferencePrompt> PrepareAsync(TranslationRequest request, CancellationToken token) =>
-        EmbeddedPromptBudget.PrepareAsync(request, RenderAsync, contextSize, maximumTokens, token);
+    public Task<PreparedInferencePrompt> PrepareAsync(TranslationRequest request, CancellationToken token)
+    {
+        request.Parameters.Validate();
+        var budget = request.Parameters.MaximumTokens ?? maximumTokens;
+        if (budget > contextSize / 2) throw new ArgumentException("阶段最大输出长度超过本地上下文的一半，请调整管线或模型上下文容量。");
+        return EmbeddedPromptBudget.PrepareAsync(request, RenderAsync, contextSize, budget, token);
+    }
 
     private async Task<(string Prompt, int Tokens)> RenderAsync(IReadOnlyList<PromptMessage> messages, CancellationToken token)
     {
@@ -40,17 +45,21 @@ public sealed class LlamaServerProtocol(HttpClient http, uint contextSize, int m
         return (prompt, items.GetArrayLength());
     }
 
-    public async Task<LocalCompletion> CompleteAsync(string prompt, IProgress<int>? progress, CancellationToken token)
+    public async Task<LocalCompletion> CompleteAsync(string prompt, IProgress<int>? progress, CancellationToken token, TranslationRequest? stageRequest = null)
     {
+        var parameters = stageRequest?.Parameters ?? new();
+        var body = new Dictionary<string, object?>
+        {
+            ["prompt"] = prompt, ["stream"] = true, ["n_predict"] = parameters.MaximumTokens ?? maximumTokens,
+            ["temperature"] = parameters.Temperature ?? defaults?.Temperature ?? .7, ["top_p"] = parameters.TopP ?? defaults?.TopP ?? .6,
+            ["top_k"] = parameters.TopK ?? defaults?.TopK ?? 20, ["repeat_penalty"] = parameters.RepeatPenalty ?? defaults?.RepeatPenalty ?? 1.05,
+            ["repeat_last_n"] = 64, ["min_p"] = 0, ["seed"] = 42,
+            ["samplers"] = new[] { "penalties", "top_k", "top_p", "temperature" }, ["cache_prompt"] = false
+        };
+        if (stageRequest?.Grammar is { } grammar) body["grammar"] = grammar;
         using var request = new HttpRequestMessage(HttpMethod.Post, "completion")
         {
-            Content = JsonContent.Create(new
-            {
-                prompt, stream = true, n_predict = maximumTokens, temperature = .7, top_p = .6, top_k = 20,
-                repeat_penalty = 1.05, repeat_last_n = 64, min_p = 0, seed = 42,
-                samplers = new[] { "penalties", "top_k", "top_p", "temperature" },
-                cache_prompt = false
-            })
+            Content = JsonContent.Create(body)
         };
         // 流式连接在取消时立即关闭，使 llama-server 撤销该请求并归还 slot。
         using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);

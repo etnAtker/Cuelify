@@ -39,7 +39,7 @@ public sealed record LlamaServerBinary(string Path, string Version, string Ident
         {
             var help = await runner.RunAsync(new(path, ["--help"], TimeSpan.FromSeconds(30)), null, token);
             var text = help.StandardOutput + help.StandardError;
-            if (help.ExitCode != 0 || new[] { "--parallel", "--host", "--port", "--device", "--no-webui", "--no-kv-unified", "--fit", "--cors-origins" }
+            if (help.ExitCode != 0 || new[] { "--parallel", "--host", "--port", "--device", "--no-webui", "--no-kv-unified", "--fit", "--cors-origins", "--jinja", "--chat-template-kwargs" }
                 .Any(option => !text.Contains(option, StringComparison.Ordinal)))
                 throw new LocalTranslationException("ServerIncompatible", "所选程序不是兼容的 llama-server，请下载当前 llama.cpp Vulkan 运行包。");
             var version = await runner.RunAsync(new(path, ["--version"], TimeSpan.FromSeconds(30)), null, token);

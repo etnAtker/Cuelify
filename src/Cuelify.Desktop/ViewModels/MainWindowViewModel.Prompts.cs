@@ -10,7 +10,7 @@ namespace Cuelify.Desktop.ViewModels;
 
 public partial class MainWindowViewModel
 {
-    private PromptProfile? _selectedPrompt;
+    private SubtitlePipelineProfile? _selectedPrompt;
     private bool _loadingPrompt;
     private bool _refreshingPrompts;
     private bool _switchingPrompt;
@@ -27,45 +27,45 @@ public partial class MainWindowViewModel
     [ObservableProperty] private string promptPreviewError = "";
     [ObservableProperty] private string promptPreviewStatus = "";
     [ObservableProperty] private int promptSectionIndex;
-    public ObservableCollection<PromptProfile> PromptItems { get; } = [];
-    public ObservableCollection<PromptProfile> VisiblePromptItems { get; } = [];
+    public ObservableCollection<SubtitlePipelineProfile> PipelineItems { get; } = [];
+    public ObservableCollection<SubtitlePipelineProfile> VisiblePipelineItems { get; } = [];
     public Task PromptSwitchTask { get; private set; } = Task.CompletedTask;
     public string[] PromptFilterNames { get; } = ["全部", "内置", "自定义"];
-    public bool IsBuiltInPrompt => _selectedPrompt is not null && PromptPresets.IsBuiltIn(_selectedPrompt.Id);
+    public bool IsBuiltInPrompt => _selectedPrompt is not null && SubtitlePipelinePresets.IsBuiltIn(_selectedPrompt.Id);
     public bool CanEditPrompt => CanConfigure && _selectedPrompt is not null && !IsBuiltInPrompt;
     public bool CanManagePrompts => CanConfigure && !_switchingPrompt;
     public bool CanDeletePrompt => CanEditPrompt && !_switchingPrompt;
-    public bool PromptHasReferences => _selectedPrompt is not null && Settings.ModelPromptBindings.Values.Any(binding => binding.PromptId == _selectedPrompt.Id);
+    public bool PromptHasReferences => _selectedPrompt is not null && Settings.ModelPipelineBindings.Values.Any(binding => binding.PipelineId == _selectedPrompt.Id);
     public bool CanCopyPromptPreview => CanManagePrompts && !string.IsNullOrEmpty(PromptSamplePreview);
     public bool HasPromptPreviewError => !string.IsNullOrEmpty(PromptPreviewError);
     public bool HasPromptPreviewStatus => !string.IsNullOrEmpty(PromptPreviewStatus);
     public string SettingsFooterStatus => HasPromptEdits || HasUnsavedSettings ? "有未保存的修改" : SettingsStatus;
-    public string PromptKind => IsBuiltInPrompt ? "内置模板 · 创建副本后可编辑" : "自定义模板";
+    public string PromptKind => IsBuiltInPrompt ? "内置管线 · 创建副本后可编辑" : "自定义管线";
     public string PromptReferences
     {
         get
         {
             if (_selectedPrompt is null) return "";
-            var names = Settings.ModelPromptBindings.Values.Where(binding => binding.PromptId == _selectedPrompt.Id).Select(binding => binding.ModelName).Distinct(StringComparer.Ordinal).ToList();
+            var names = Settings.ModelPipelineBindings.Values.Where(binding => binding.PipelineId == _selectedPrompt.Id).Select(binding => binding.ModelName).Distinct(StringComparer.Ordinal).ToList();
             var defaults = new List<string>();
             foreach (var model in Infrastructure.Translation.Local.EmbeddedModelCatalog.Presets)
             {
-                if (!Settings.ModelPromptBindings.ContainsKey("local:" + model.Id) && model.DefaultPromptId == _selectedPrompt.Id) defaults.Add(model.Name);
+                if (!Settings.ModelPipelineBindings.ContainsKey("local:" + model.Id) && model.DefaultPipelineId == _selectedPrompt.Id) defaults.Add(model.Name);
             }
             if (!IsLocal)
             {
-                try { if (!Settings.ModelPromptBindings.ContainsKey(Settings.ModelKey()) && Settings.GetProfile().Id == _selectedPrompt.Id) defaults.Add(Settings.ModelName()); }
+                try { if (!Settings.ModelPipelineBindings.ContainsKey(Settings.ModelKey()) && Settings.GetPipeline().Id == _selectedPrompt.Id) defaults.Add(Settings.ModelName()); }
                 catch (ArgumentException) { /* 地址编辑尚未完成时保留库的可编辑性。 */ }
             }
             var lines = new List<string>();
-            if (defaults.Count > 0) lines.Add("默认使用此模板：" + string.Join("、", defaults));
-            if (names.Count > 0) lines.Add("已指定此模板：" + string.Join("、", names));
-            return lines.Count == 0 ? "尚无模型使用此模板" : string.Join(Environment.NewLine, lines);
+            if (defaults.Count > 0) lines.Add("默认使用此管线：" + string.Join("、", defaults));
+            if (names.Count > 0) lines.Add("已指定此管线：" + string.Join("、", names));
+            return lines.Count == 0 ? "尚无模型使用此管线" : string.Join(Environment.NewLine, lines);
         }
     }
-    public string PromptNameError => string.IsNullOrWhiteSpace(ProfileName) ? "请填写模板名称。" :
-        Settings.AllPrompts.Any(other => other.Id != _selectedPrompt?.Id && other.Name.Equals(ProfileName.Trim(), StringComparison.OrdinalIgnoreCase))
-            ? "模板名称已存在，请使用其他名称。" : "";
+    public string PromptNameError => string.IsNullOrWhiteSpace(ProfileName) ? "请填写管线名称。" :
+        Settings.AllPipelines.Any(other => other.Id != _selectedPrompt?.Id && other.Name.Equals(ProfileName.Trim(), StringComparison.OrdinalIgnoreCase))
+            ? "管线名称已存在，请使用其他名称。" : "";
     public string PromptContentError => string.IsNullOrEmpty(PromptNameError) ? PromptValidationError : "";
     public string PromptVariableHint => BatchTranslation ? "用户模板需要包含 {cues_json}，并要求返回字幕 ID 对应译文的 JSON。" : "用户模板需要包含 {source_text}，并要求只返回当前字幕译文。";
     public string PromptValidationError
@@ -76,13 +76,13 @@ public partial class MainWindowViewModel
             if (!string.IsNullOrEmpty(PromptNameError)) return PromptNameError;
             try
             {
-                var draft = PromptDraft(); PromptBuilder.Validate(draft);
+                var draft = PromptDraft(); draft.Validate();
                 return "";
             }
-            catch (ArgumentException exception) { return exception.Message; }
+            catch (Exception exception) when (exception is ArgumentException or FormatException or OverflowException) { return exception.Message; }
         }
     }
-    public PromptProfile? SelectedPrompt
+    public SubtitlePipelineProfile? SelectedPipeline
     {
         get => _selectedPrompt;
         set
@@ -91,38 +91,38 @@ public partial class MainWindowViewModel
             PromptSwitchTask = SwitchPromptAsync(value);
         }
     }
-    public PromptProfile? VisibleSelectedPrompt
+    public SubtitlePipelineProfile? VisibleSelectedPipeline
     {
-        get => VisiblePromptItems.FirstOrDefault(profile => profile.Id == _selectedPrompt?.Id);
-        set => SelectedPrompt = value;
+        get => VisiblePipelineItems.FirstOrDefault(profile => profile.Id == _selectedPrompt?.Id);
+        set => SelectedPipeline = value;
     }
-    public PromptProfile? AssociatedPrompt
+    public SubtitlePipelineProfile? AssociatedPipeline
     {
         get
         {
-            try { var id = Settings.GetProfile().Id; return PromptItems.FirstOrDefault(profile => profile.Id == id); }
+            try { var id = Settings.GetPipeline().Id; return PipelineItems.FirstOrDefault(profile => profile.Id == id); }
             catch (ArgumentException) { return null; }
         }
         set
         {
-            if (!CanConfigure || _refreshingPrompts || value is null || value.Id == AssociatedPrompt?.Id) return;
-            try { Settings.AssociatePrompt(value.Id); }
+            if (!CanConfigure || _refreshingPrompts || value is null || value.Id == AssociatedPipeline?.Id) return;
+            try { Settings.AssociatePipeline(value.Id); }
             catch (Exception exception) { ReportError(exception); }
         }
     }
-    private void InitializePromptLibrary()
+    private void InitializePipelineLibrary()
     {
         _loadingPrompt = true;
-        try { HasPromptEdits = false; RefreshPromptItems(); }
+        try { HasPromptEdits = false; RefreshPipelineItems(); }
         finally { _loadingPrompt = false; }
-        OpenPrompt(PromptItems.FirstOrDefault(profile => profile.Id == _selectedPrompt?.Id) ?? PromptPresets.BatchSubtitles);
+        OpenPrompt(PipelineItems.FirstOrDefault(profile => profile.Id == _selectedPrompt?.Id) ?? SubtitlePipelinePresets.Joint);
     }
-    private void RefreshPromptItems()
+    private void RefreshPipelineItems()
     {
         _refreshingPrompts = true;
         try
         {
-            SynchronizePrompts(PromptItems, Settings.AllPrompts.ToArray());
+            SynchronizePrompts(PipelineItems, Settings.AllPipelines.ToArray());
             RefreshPromptFilter();
         }
         finally { _refreshingPrompts = false; }
@@ -133,16 +133,16 @@ public partial class MainWindowViewModel
         var wasRefreshing = _refreshingPrompts; _refreshingPrompts = true;
         try
         {
-            var visible = PromptItems.Where(profile =>
-                (PromptFilterIndex == 0 || PromptPresets.IsBuiltIn(profile.Id) == (PromptFilterIndex == 1)) &&
+            var visible = PipelineItems.Where(profile =>
+                (PromptFilterIndex == 0 || SubtitlePipelinePresets.IsBuiltIn(profile.Id) == (PromptFilterIndex == 1)) &&
                 (profile.Name.Contains(PromptSearch, StringComparison.OrdinalIgnoreCase) || profile.Description.Contains(PromptSearch, StringComparison.OrdinalIgnoreCase))).ToList();
-            if (_selectedPrompt is not null && !PromptItems.Any(profile => profile.Id == _selectedPrompt.Id)) visible.Add(_selectedPrompt);
-            SynchronizePrompts(VisiblePromptItems, visible);
+            if (_selectedPrompt is not null && !PipelineItems.Any(profile => profile.Id == _selectedPrompt.Id)) visible.Add(_selectedPrompt);
+            SynchronizePrompts(VisiblePipelineItems, visible);
         }
         finally { _refreshingPrompts = wasRefreshing; }
-        OnPropertyChanged(nameof(SelectedPrompt)); OnPropertyChanged(nameof(VisibleSelectedPrompt));
+        OnPropertyChanged(nameof(SelectedPipeline)); OnPropertyChanged(nameof(VisibleSelectedPipeline));
     }
-    private static void SynchronizePrompts(ObservableCollection<PromptProfile> items, IReadOnlyList<PromptProfile> desired)
+    private static void SynchronizePrompts(ObservableCollection<SubtitlePipelineProfile> items, IReadOnlyList<SubtitlePipelineProfile> desired)
     {
         // 保留未变化条目的对象与选择，避免重建 ItemsSource 引起双向绑定回写。
         for (var index = items.Count - 1; index >= 0; index--)
@@ -158,29 +158,45 @@ public partial class MainWindowViewModel
             }
         }
     }
-    private void OpenPrompt(PromptProfile profile)
+    private void OpenPrompt(SubtitlePipelineProfile profile)
     {
         _loadingPrompt = true;
         try
         {
             _selectedPrompt = profile; ProfileName = profile.Name; PromptDescription = profile.Description;
-            SystemTemplate = profile.SystemTemplate; UserTemplate = profile.UserTemplate;
-            BatchTranslation = profile.BatchTranslation; PromptBatchSize = profile.BatchSize; PromptMaximumBatchCharacters = profile.MaximumBatchCharacters;
-            HasPromptEdits = !PromptPresets.IsBuiltIn(profile.Id) && !Settings.PromptLibrary.ContainsKey(profile.Id);
+            PipelineEditingStage = 0;
+            SystemTemplate = profile.Translation.SystemTemplate; UserTemplate = profile.Translation.UserTemplate;
+            SegmentationSystem = profile.Segmentation.SystemTemplate; SegmentationUser = profile.Segmentation.UserTemplate;
+            PipelineModeIndex = (int)profile.Mode; PipelineBlockSeconds = profile.BlockSeconds; PipelineContextCharacters = profile.ContextCharacters;
+            PipelineBeforeCues = profile.BeforeCues; PipelineAfterCues = profile.AfterCues; PipelineContextBudget = profile.MaximumContextCharacters;
+            PipelineMaximumSeconds = profile.MaximumCueSeconds; PipelineMinimumSeconds = profile.MinimumCueSeconds;
+            PipelineLineCharacters = profile.LineCharacters; PipelineReadingSpeed = profile.ReadingCharactersPerSecond;
+            LoadStageParameters(profile);
+            BatchTranslation = profile.Translation.BatchTranslation; PromptBatchSize = profile.Translation.BatchSize; PromptMaximumBatchCharacters = profile.Translation.MaximumBatchCharacters;
+            HasPromptEdits = !SubtitlePipelinePresets.IsBuiltIn(profile.Id) && !Settings.PipelineLibrary.ContainsKey(profile.Id);
             ClearPromptPreview(); PromptSectionIndex = 0;
-            RefreshPromptItems();
+            RefreshPipelineItems();
         }
         finally { _loadingPrompt = false; }
-        OnPropertyChanged(nameof(SelectedPrompt)); OnPropertyChanged(nameof(VisibleSelectedPrompt)); RefreshPromptCommands();
+        OnPropertyChanged(nameof(SelectedPipeline)); OnPropertyChanged(nameof(VisibleSelectedPipeline)); RefreshPromptCommands();
     }
-    private PromptProfile PromptDraft() => new(ProfileName.Trim(), SystemTemplate, UserTemplate, BatchTranslation)
-    { Id = _selectedPrompt!.Id, Description = PromptDescription, BatchSize = PromptBatchSize, MaximumBatchCharacters = PromptMaximumBatchCharacters };
+    private SubtitlePipelineProfile PromptDraft() => new(ProfileName.Trim(), (SubtitlePipelineMode)PipelineModeIndex)
+    {
+        Id = _selectedPrompt!.Id, Description = PromptDescription,
+        Translation = new(ProfileName.Trim(), SystemTemplate, UserTemplate, BatchTranslation)
+        { BatchSize = PromptBatchSize, MaximumBatchCharacters = PromptMaximumBatchCharacters },
+        Segmentation = new(SegmentationSystem, SegmentationUser) { Parameters = ReadStageParameters(true) },
+        TranslationParameters = ReadStageParameters(false), BlockSeconds = PipelineBlockSeconds, ContextCharacters = PipelineContextCharacters,
+        BeforeCues = PipelineBeforeCues, AfterCues = PipelineAfterCues, MaximumContextCharacters = PipelineContextBudget,
+        MaximumCueSeconds = PipelineMaximumSeconds, MinimumCueSeconds = PipelineMinimumSeconds,
+        LineCharacters = PipelineLineCharacters, ReadingCharactersPerSecond = PipelineReadingSpeed
+    };
     private bool CommitPromptEditor(AppSettings snapshot)
     {
         if (!HasPromptEdits) return true;
         if (IsBuiltInPrompt || !string.IsNullOrEmpty(PromptValidationError))
-        { Error = IsBuiltInPrompt ? "内置模板不可修改，请先创建副本。" : PromptValidationError; return false; }
-        snapshot.SavePrompt(PromptDraft()); return true;
+        { Error = IsBuiltInPrompt ? "内置管线不可修改，请先创建副本。" : PromptValidationError; return false; }
+        snapshot.SavePipeline(PromptDraft()); return true;
     }
     private void PromptChanged()
     {
@@ -189,15 +205,15 @@ public partial class MainWindowViewModel
     }
     private void RefreshPromptAssociations()
     {
-        OnPropertyChanged(nameof(AssociatedPrompt)); OnPropertyChanged(nameof(PromptReferences)); OnPropertyChanged(nameof(PromptHasReferences));
+        OnPropertyChanged(nameof(AssociatedPipeline)); OnPropertyChanged(nameof(PromptReferences)); OnPropertyChanged(nameof(PromptHasReferences));
     }
     private void RefreshPromptCommands()
     {
-        OnPropertyChanged(nameof(IsBuiltInPrompt)); OnPropertyChanged(nameof(CanEditPrompt)); OnPropertyChanged(nameof(CanDeletePrompt));
+        OnPropertyChanged(nameof(IsBuiltInPrompt)); OnPropertyChanged(nameof(CanEditPrompt)); OnPropertyChanged(nameof(CanEditSegmentationSettings)); OnPropertyChanged(nameof(CanDeletePrompt));
         OnPropertyChanged(nameof(PromptKind)); OnPropertyChanged(nameof(CanManagePrompts)); OnPropertyChanged(nameof(CanCopyPromptPreview)); OnPropertyChanged(nameof(PromptVariableHint)); OnPropertyChanged(nameof(PromptValidationError)); OnPropertyChanged(nameof(PromptNameError)); OnPropertyChanged(nameof(PromptContentError));
         NewPromptCommand.NotifyCanExecuteChanged(); CopyPromptCommand.NotifyCanExecuteChanged(); DeletePromptCommand.NotifyCanExecuteChanged();
         SavePromptCommand.NotifyCanExecuteChanged(); PreviewPromptSampleCommand.NotifyCanExecuteChanged(); CopyPromptPreviewCommand.NotifyCanExecuteChanged();
-        ViewAssociatedPromptCommand.NotifyCanExecuteChanged();
+        ViewAssociatedPipelineCommand.NotifyCanExecuteChanged();
     }
     partial void OnPromptDescriptionChanged(string value) => PromptChanged();
     partial void OnBatchTranslationChanged(bool value) => PromptChanged();
@@ -214,10 +230,10 @@ public partial class MainWindowViewModel
     private string UniquePromptName(string name)
     {
         var candidate = name; var suffix = 2;
-        while (Settings.AllPrompts.Any(profile => profile.Name.Equals(candidate, StringComparison.OrdinalIgnoreCase))) candidate = name + " " + suffix++;
+        while (Settings.AllPipelines.Any(profile => profile.Name.Equals(candidate, StringComparison.OrdinalIgnoreCase))) candidate = name + " " + suffix++;
         return candidate;
     }
-    private async Task SwitchPromptAsync(PromptProfile next)
+    private async Task SwitchPromptAsync(SubtitlePipelineProfile next)
     {
         if (!CanManagePrompts) return;
         if (!HasPromptEdits) { OpenPrompt(next); return; }
@@ -226,7 +242,7 @@ public partial class MainWindowViewModel
         {
             // 等双向选择回写结束后恢复原选择，再等待模态确认。
             await Task.Yield();
-            OnPropertyChanged(nameof(SelectedPrompt)); OnPropertyChanged(nameof(VisibleSelectedPrompt));
+            OnPropertyChanged(nameof(SelectedPipeline)); OnPropertyChanged(nameof(VisibleSelectedPipeline));
             var choice = await _dialogs.ConfirmPromptSwitchAsync(Sanitize(ProfileName));
             if (choice == PromptSwitchChoice.Cancel) return;
             if (choice == PromptSwitchChoice.Save)
@@ -240,41 +256,42 @@ public partial class MainWindowViewModel
         finally
         {
             _switchingPrompt = false;
-            OnPropertyChanged(nameof(SelectedPrompt)); OnPropertyChanged(nameof(VisibleSelectedPrompt)); RefreshPromptCommands();
+            OnPropertyChanged(nameof(SelectedPipeline)); OnPropertyChanged(nameof(VisibleSelectedPipeline)); RefreshPromptCommands();
         }
     }
     [RelayCommand(CanExecute = nameof(CanManagePrompts))]
-    private void NewPrompt() => SelectedPrompt = new(UniquePromptName("新提示词"), "", "", false);
+    private void NewPrompt() => SelectedPipeline = SubtitlePipelinePresets.Direct with { Id = Guid.NewGuid().ToString("N"), Name = UniquePromptName("新管线"), Translation = PromptPresets.SingleSimple with { UserTemplate = "" } };
     [RelayCommand(CanExecute = nameof(CanManagePrompts))]
     private void CopyPrompt()
     {
-        if (_selectedPrompt is not null) SelectedPrompt = PromptDraft() with { Id = Guid.NewGuid().ToString("N"), Name = UniquePromptName(ProfileName + " 副本") };
+        if (_selectedPrompt is not null) SelectedPipeline = PromptDraft() with { Id = Guid.NewGuid().ToString("N"), Name = UniquePromptName(ProfileName + " 副本") };
     }
     [RelayCommand(CanExecute = nameof(CanConfigure))]
     private Task SavePromptAsync() => SaveSettingsAsync();
     [RelayCommand(CanExecute = nameof(CanManagePrompts))]
-    private void ViewAssociatedPrompt() { SelectedPrompt = AssociatedPrompt; SettingsSectionIndex = 2; ShowSettings(); }
+    private void ViewAssociatedPipeline() { SelectedPipeline = AssociatedPipeline; SettingsSectionIndex = 2; ShowSettings(); }
     [RelayCommand(CanExecute = nameof(CanDeletePrompt))]
     private async Task DeletePromptAsync()
     {
         if (!CanDeletePrompt) return;
         var id = _selectedPrompt!.Id;
-        var message = $"删除提示词“{Sanitize(ProfileName)}”？" + (PromptHasReferences ? $"\n{PromptReferences}\n使用此模板的模型将切换到各自的默认提示词。" : "");
+        var message = $"删除管线“{Sanitize(ProfileName)}”？" + (PromptHasReferences ? $"\n{PromptReferences}\n使用此管线的模型将切换到各自的默认管线。" : "");
         if (!await _dialogs.ConfirmAsync(message) || !CanDeletePrompt || id != _selectedPrompt?.Id) return;
-        if (!Settings.PromptLibrary.ContainsKey(id))
+        if (!Settings.PipelineLibrary.ContainsKey(id))
         {
-            OpenPrompt(PromptPresets.BatchSubtitles); Error = ""; SettingsStatus = "未保存的提示词已删除"; return;
+            OpenPrompt(SubtitlePipelinePresets.Joint); Error = ""; SettingsStatus = "未保存的管线已删除"; return;
         }
         IsSavingSettings = true;
         try
         {
             var snapshot = Services.ConfigurationStore.Snapshot(Settings);
-            snapshot.DeletePrompt(id);
+            snapshot.DeletePipeline(id);
             await _store.SaveAsync(snapshot, Secrets);
-            Settings.PromptLibrary = snapshot.PromptLibrary; Settings.ModelPromptBindings = snapshot.ModelPromptBindings;
+            Settings.PipelineLibrary = snapshot.PipelineLibrary; Settings.ModelPipelineBindings = snapshot.ModelPipelineBindings;
             _savedSettings = Services.ConfigurationStore.Snapshot(snapshot);
-            HasUnsavedSettings = false; Error = ""; SettingsStatus = "提示词已删除";
-            OpenPrompt(PromptPresets.BatchSubtitles); ResetEngineStatus(); OnPropertyChanged(nameof(TaskPromptSummary)); RefreshCommands();
+            RefreshTaskPipelines();
+            HasUnsavedSettings = false; Error = ""; SettingsStatus = "管线已删除";
+            OpenPrompt(SubtitlePipelinePresets.Joint); ResetEngineStatus(); OnPropertyChanged(nameof(TaskPromptSummary)); RefreshCommands();
         }
         catch (Exception exception) { ReportError(exception); }
         finally { IsSavingSettings = false; }
@@ -288,11 +305,17 @@ public partial class MainWindowViewModel
     {
         try
         {
-            var profile = PromptDraft();
+            var pipeline = PromptDraft(); pipeline.Validate();
+            var profile = pipeline.Translation with { Parameters = pipeline.TranslationParameters, MaximumTextCharacters = pipeline.LineCharacters * 2, ReadingCharactersPerSecond = pipeline.ReadingCharactersPerSecond };
             SubtitleCue[] sample = [new("sample-1", TimeSpan.Zero, TimeSpan.FromSeconds(1), "Hello.", null),
                 new("sample-2", TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(2), "How are you?", null)];
             var settings = new TranslationSettings { SourceLanguage = "英语", TargetLanguage = "中文", TargetStyle = Settings.TargetStyle };
             var request = new PromptBuilder().Build(profile, settings, profile.BatchTranslation ? sample : sample.Take(1).ToArray(), []);
+            if (pipeline.Mode != SubtitlePipelineMode.DirectTranslation && PipelineEditingStage == 0)
+            {
+                var words = new Core.Speech.WordToken[] { new("Hello.", TimeSpan.Zero, TimeSpan.FromSeconds(1), null), new("How are you?", TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(2), null) };
+                request = PipelinePromptBuilder.Build(words, PipelinePromptBuilder.Plan(words, pipeline)[0], pipeline, settings);
+            }
             PromptSamplePreview = Sanitize(JsonSerializer.Serialize(request.Messages, new JsonSerializerOptions
             { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));
             PromptSystemPreview = Sanitize(string.Join(Environment.NewLine, request.Messages.Where(message => message.Role == "system").Select(message => message.Content)));

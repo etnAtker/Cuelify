@@ -62,6 +62,9 @@ public sealed class PromptBuilder
 
     public static void Validate(PromptProfile profile)
     {
+        profile.Parameters.Validate();
+        if (profile.MaximumTextCharacters is <= 0) throw new ArgumentException("译文长度限制无效。");
+        if (profile.ReadingCharactersPerSecond is { } speed && (!double.IsFinite(speed) || speed <= 0)) throw new ArgumentException("阅读速度目标无效。");
         if (string.IsNullOrWhiteSpace(profile.Name) || string.IsNullOrWhiteSpace(profile.UserTemplate) ||
             profile.SystemTemplate is null || string.IsNullOrWhiteSpace(profile.Id) || profile.Description is null) throw new ArgumentException("提示词模板无效。");
         if (profile.BatchTranslation && (profile.BatchSize is < 1 or > 100 || profile.MaximumBatchCharacters is < 100 or > 50000))
@@ -104,10 +107,17 @@ public sealed class PromptBuilder
         string Render(string template) => Variable.Replace(template, match => values[match.Groups[1].Value]);
         var messages = new List<PromptMessage>();
         if (!string.IsNullOrWhiteSpace(profile.SystemTemplate)) messages.Add(new("system", Render(profile.SystemTemplate)));
-        messages.Add(new("user", Render(profile.UserTemplate)));
+        var user = Render(profile.UserTemplate);
+        if (profile.MaximumTextCharacters is { } maximum)
+            user += $"\n字幕显示要求：每条译文最多 {maximum} 字符，语言为 {settings.TargetLanguage}。忠实保留事实、否定和人物关系，填充词可适度精简。" +
+                (profile.BatchTranslation ? "仅输出输入 ID 到译文字符串的 JSON，必须保留全部 ID。" : "仅输出当前字幕译文。");
+        if (profile.ReadingCharactersPerSecond is { } cps)
+            user += $"\n阅读速度目标为每秒 {cps} 字。字幕显示时长：" + JsonSerializer.Serialize(cues.Select(c => new { c.Id, Seconds = (c.End - c.Start).TotalSeconds }), PromptJsonOptions);
+        messages.Add(new("user", user));
         return new(cues, messages)
         {
-            PromptContext = new(profile, settings, context.TakeLast(contextItems.Count).ToArray(), followingItems)
+            PromptContext = new(profile, settings, context.TakeLast(contextItems.Count).ToArray(), followingItems), Parameters = profile.Parameters,
+            Grammar = profile.MaximumTextCharacters is { } grammarMaximum && profile.BatchTranslation ? PipelineTranslationGrammar.Build(cues, grammarMaximum) : null
         };
     }
 }

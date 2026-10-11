@@ -17,10 +17,17 @@ public interface IDesktopJobService : IAsyncDisposable
     Task<MediaInfo> ProbeAsync(string input, AppSettings settings, CancellationToken token);
     Task<TranscriptionResult> TranscribeAsync(string input, AppSettings settings, string key, IProgress<TranscriptionProgress> progress, CancellationToken token);
     Task<TranslationResult> TranslateAsync(IReadOnlyList<SubtitleCue> cues, AppSettings settings, string key, IReadOnlySet<string>? force, IProgress<TranslationProgress> progress, CancellationToken token);
+    Task<SubtitlePipelineResult> GenerateCuesAsync(TranscriptionResult source, AppSettings settings, string key,
+        IProgress<TranslationProgress> progress, CancellationToken token)
+    {
+        if (settings.GetPipeline().Mode != SubtitlePipelineMode.DirectTranslation) throw new NotSupportedException("该任务服务不支持所选字幕管线。");
+        return Task.FromResult(new SubtitlePipelineResult(source.Cues, [], 0, 0));
+    }
     Task<string> TestEngineAsync(AppSettings settings, string key, CancellationToken token, IProgress<LocalPreparationProgress>? progress = null);
     Task ValidateLocalAsync(AppSettings settings, CancellationToken token, IProgress<LocalPreparationProgress>? progress = null);
     string Preview(IReadOnlyList<SubtitleCue> cues, AppSettings settings);
     Task<string> PreviewAsync(IReadOnlyList<SubtitleCue> cues, AppSettings settings, CancellationToken token) => Task.FromResult(Preview(cues, settings));
+    Task<string> PreviewPipelineAsync(TranscriptionResult source, IReadOnlyList<SubtitleCue> cues, AppSettings settings, CancellationToken token) => PreviewAsync(cues, settings, token);
     ValueTask ReleaseEmbeddedModelAsync() => ValueTask.CompletedTask;
 }
 
@@ -57,8 +64,17 @@ public sealed class DesktopJobService(string? root = null) : IDesktopJobService
     public Task<TranslationResult> TranslateAsync(IReadOnlyList<SubtitleCue> cues, AppSettings settings, string key, IReadOnlySet<string>? force, IProgress<TranslationProgress> progress, CancellationToken token) => Task.Run(async () =>
     {
         var engine = await EngineAsync(settings, key, token);
-        var result = await new TranslationOrchestrator(engine, Path.Combine(_root, "Translations")).TranslateAsync(cues, settings.GetProfile(), settings.TranslationSettings(), force, progress, token);
-        return result;
+        var result = await new TranslationOrchestrator(engine, Path.Combine(_root, "Translations")).TranslateAsync(cues, settings.GetProfile(), settings.TranslationSettings(), force, progress, token,
+            previousCues: force is not null || settings.GetPipeline().Mode == SubtitlePipelineMode.JointSegmentationTranslation ? cues : null);
+        return result with { Cues = result.Cues.Select(c => c.TranslatedText is null ? c : c with { TranslatedText = PipelineDisplay.Wrap(c.TranslatedText, settings.GetPipeline().LineCharacters) }).ToArray() };
+    }, token);
+
+    public Task<SubtitlePipelineResult> GenerateCuesAsync(TranscriptionResult source, AppSettings settings, string key,
+        IProgress<TranslationProgress> progress, CancellationToken token) => Task.Run(async () =>
+    {
+        var engine = await EngineAsync(settings, key, token);
+        return await new SubtitlePipelineOrchestrator(engine, Path.Combine(_root, "Pipelines")).GenerateAsync(source.Words, source.Cues,
+            source.Duration, settings.GetPipeline(), settings.TranslationSettings(), progress, token);
     }, token);
 
     private async Task<ITranslationEngine> EngineAsync(AppSettings settings, string key, CancellationToken token, IProgress<LocalPreparationProgress>? progress = null)
@@ -109,7 +125,7 @@ public sealed class DesktopJobService(string? root = null) : IDesktopJobService
         var batch = TranslationOrchestrator.Plan(cues, settings.TranslationSettings()).FirstOrDefault() ?? [];
         var request = new PromptBuilder().Build(settings.GetProfile(), settings.TranslationSettings(), batch, [], cues.Skip(batch.Count).ToArray());
         var value = settings.Provider == TranslationProvider.Local ? (object)request.Messages
-            : CloudRequestBuilder.Build(settings.CloudOptions(), request.Messages, settings.Provider == TranslationProvider.DeepSeek ? settings.ThinkingOptions() : null);
+            : CloudRequestBuilder.Build(settings.CloudOptions(), request, settings.Provider == TranslationProvider.DeepSeek ? settings.ThinkingOptions() : null);
         return JsonSerializer.Serialize(value, new JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
     }
     public async Task<string> PreviewAsync(IReadOnlyList<SubtitleCue> cues, AppSettings settings, CancellationToken token)
@@ -121,14 +137,46 @@ public sealed class DesktopJobService(string? root = null) : IDesktopJobService
             var source = TranslationOrchestrator.Plan(all, settings.TranslationSettings()).FirstOrDefault() ?? [];
             var engine = (LocalTranslationEngine)await EngineAsync(settings, "", token);
             PreparedInferencePrompt prepared;
+            TranslationRequest request;
             while (true)
             {
-                var request = new PromptBuilder().Build(settings.GetProfile(), settings.TranslationSettings(), source, [], all.Skip(source.Count).ToArray());
+                request = new PromptBuilder().Build(settings.GetProfile(), settings.TranslationSettings(), source, [], all.Skip(source.Count).ToArray());
                 try { prepared = await engine.PrepareAsync(request, token); break; }
                 catch (PromptCapacityException) when (source.Count > 1) { source = source.Take(source.Count / 2).ToArray(); }
             }
-            return JsonSerializer.Serialize(prepared, new JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
+            return JsonSerializer.Serialize(new { Prompt = prepared, StageParameters = request.Parameters,
+                ModelDefaults = EmbeddedModelCatalog.Get(settings.LocalModelId).DefaultParameters,
+                MaximumTokens = request.Parameters.MaximumTokens ?? settings.LocalMaximumTokens },
+                new JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
         }, token);
+    }
+    public async Task<string> PreviewPipelineAsync(TranscriptionResult source, IReadOnlyList<SubtitleCue> cues, AppSettings settings, CancellationToken token)
+    {
+        var profile = settings.GetPipeline();
+        var previews = new List<object>();
+        if (profile.Mode != SubtitlePipelineMode.DirectTranslation && source.Words.Count > 0)
+        {
+            var block = PipelinePromptBuilder.Plan(source.Words, profile)[0];
+            var engine = await EngineAsync(settings, "", token);
+            while (true)
+            {
+                var request = PipelinePromptBuilder.Build(source.Words, block, profile, settings.TranslationSettings());
+                try
+                {
+                    var value = engine is LocalTranslationEngine local ? (object)new { Prompt = await local.PrepareAsync(request, token), request.Parameters, request.Grammar } :
+                        CloudRequestBuilder.Build(settings.CloudOptions(), request, settings.Provider == TranslationProvider.DeepSeek ? settings.ThinkingOptions() : null);
+                    previews.Add(new { Stage = profile.Mode == SubtitlePipelineMode.SegmentThenTranslate ? "分句" : "联合分句与翻译", Request = value });
+                    break;
+                }
+                catch (PromptCapacityException) when (block.Boundaries.Count > 1)
+                {
+                    var last = block.Boundaries[(block.Boundaries.Count - 1) / 2];
+                    block = block with { Last = last, Boundaries = block.Boundaries.Where(b => b <= last).ToArray() };
+                }
+            }
+        }
+        previews.Add(new { Stage = profile.Mode == SubtitlePipelineMode.JointSegmentationTranslation ? "定向重翻" : "翻译", Request = await PreviewAsync(cues, settings, token) });
+        return JsonSerializer.Serialize(previews, new JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
     }
     public Task ValidateLocalAsync(AppSettings settings, CancellationToken token, IProgress<LocalPreparationProgress>? progress = null) => Task.Run(async () =>
     {

@@ -10,9 +10,12 @@ public sealed record PromptProfile(string Name, string SystemTemplate, string Us
     public string Description { get; init; } = "";
     public int BatchSize { get; init; } = 12;
     public int MaximumBatchCharacters { get; init; } = 6000;
+    public InferenceParameters Parameters { get; init; } = new();
+    public int? MaximumTextCharacters { get; init; }
+    public double? ReadingCharactersPerSecond { get; init; }
     [JsonIgnore] public TranslationOutputFormat OutputFormat => BatchTranslation ? TranslationOutputFormat.CueIdJson : TranslationOutputFormat.PlainText;
     [JsonIgnore] public object ExecutionIdentity => new { SystemTemplate, UserTemplate, BatchTranslation,
-        BatchSize = BatchTranslation ? BatchSize : 1, MaximumBatchCharacters = BatchTranslation ? MaximumBatchCharacters : 0 };
+        BatchSize = BatchTranslation ? BatchSize : 1, MaximumBatchCharacters = BatchTranslation ? MaximumBatchCharacters : 0, Parameters, MaximumTextCharacters, ReadingCharactersPerSecond };
     public override string ToString() => Name;
 }
 public sealed record TranslationSettings
@@ -46,6 +49,8 @@ public sealed record TranslationRequest(IReadOnlyList<SubtitleCue> Cues, IReadOn
 {
     // 裁剪参考内容后从模板重建，不能按字符切断渲染后的指令或当前字幕。
     public TranslationPromptContext? PromptContext { get; init; }
+    public InferenceParameters Parameters { get; init; } = new();
+    public string? Grammar { get; init; }
 }
 public sealed record TranslationResponse(string Content);
 public interface ITranslationEngine

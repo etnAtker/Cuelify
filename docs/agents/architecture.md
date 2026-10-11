@@ -17,11 +17,11 @@ Core 定义领域模型、接口和纯逻辑，不引用 Avalonia 或 Infrastruc
 | `Core/Media` | `ICommandRunner`、`IAudioProcessor`、`AudioChunkPlanner`：媒体契约及切点规划 |
 | `Core/Speech` | 词与语音模型、`WordTimelineMerger`：局部时间转换及重叠去重 |
 | `Core/Subtitles` | `CueBuilder`、`SrtSerializer`：分句、源文/严格译文序列化 |
-| `Core/Translation` | `ITranslationEngine`、`PromptBuilder`、`AlignmentValidator`：模板和输出协议 |
+| `Core/Translation` | `SubtitlePipelineProfile`、`PipelinePromptBuilder`、`PipelineDisplay`、`PromptBuilder`、`AlignmentValidator`：管线、词范围、显示与输出协议 |
 | `Infrastructure/Media` | `ProcessCommandRunner`、`FfmpegAudioProcessor`：文本/二进制管道、音频准备和片段导出 |
 | `Infrastructure/Speech` | Silero ONNX、ElevenLabs 客户端和词响应解析 |
 | `Infrastructure/Transcription` | `TranscriptionPipeline`：识别缓存、分片并发、重试与原始 cue |
-| `Infrastructure/Translation` | 云端 transport/provider、`TranslationOrchestrator`、提示词存储 |
+| `Infrastructure/Translation` | 云端 transport/provider、`SubtitlePipelineOrchestrator`、`TranslationOrchestrator`：阶段缓存与补译 |
 | `Infrastructure/Translation/Local` | 预置模型目录、动态官方下载与校验、Vulkan 运行时、GPU 证据、采样与推理 |
 | `Infrastructure/Storage` | `AtomicFile`：哈希、原子 JSON/文本读写；`CredentialStore`：跨平台主密码加密凭证 |
 | `Desktop/Services` | `AppSettings`、`ConfigurationStore`、`DesktopJobService`、`WindowDialogs`、`UserErrorMessages` |
@@ -45,9 +45,19 @@ Core 定义领域模型、接口和纯逻辑，不引用 Avalonia 或 Infrastruc
 
 流水线对输入持有只读共享文件句柄，并用完整路径、长度、修改时间、内容 SHA-256 和准备版本建立指纹。音频缓存校验大小与哈希；VAD、分片和 ASR 参数参与各自缓存校验，成功分片单独保存。实际上传过大时有限缩短分片并重新导出，不重复上传同一过大文件。
 
-词响应使用片段起点还原全局时间，再按时间与文本处理重叠。`CueBuilder` 完成分句；翻译层接收稳定 cue。Desktop 使用临时原文 SRT 承接识别编排，结束后清除临时输出，保留有效缓存；用户最终导出走严格译文序列化。
+词响应还原全局时间并按文本/时间去重，保留原始 Words。`CueBuilder` 提供直接翻译的 cue 与识别中间显示；语义管线使用 Words 重新生成最终 cue。Desktop 清除临时原文 SRT，保留识别缓存，用户只导出严格译文 SRT。
 
 词解析和全局时间转换接受起止时间相同的词；原始词缓存不加人工时长。`CueBuilderOptions.ZeroDurationTolerance` 控制零时长文本的相邻合并及孤立字幕显示时长，默认 500 毫秒，桌面保存为 `ZeroDurationToleranceMs`。改变该值重新组装 cue，复用 ASR 分片缓存；翻译缓存仍由新 cue 内容和时间确定。
+
+## 字幕管线
+
+`SubtitlePipelineOrchestrator` 在翻译前运行独立的管线：直接翻译返回原 cue；两步流程从词 ID 选择末词，再调用既有翻译编排；联合流程同时输出末词 ID 和译文，全部有效时无需第二次翻译请求。第一版每个阶段使用任务选定的同一模型。
+
+`PipelinePromptBuilder` 先生成标点、说话人变化、长静音和长句停顿候选，再反向验证完整覆盖路径。模型不能创建任意时间或丢词；短逗号片段合并，最长时间及强制说话人/静音边界由程序控制。没有合法路径则明确报错，不强切词。请求附连贯原文、词表、起点到合法末词的映射及只供参考的前后文；云端验收失败的有限重试附具体校验原因。本地 GBNF 限定合法词路径，翻译步骤另限定批量 ID 与字符串长度。
+
+`PipelineDisplay` 从连续词范围计算 cue，合并重叠/同起点文字，在可用静音内延长显示，生成最终 ID。原词时码不修改；两行换行尽量均衡，可见字符计数排除换行。联合共屏译文过长时清空该最终 cue 的译文并补译，保留其他有效结果。阅读速度是提示词目标；显示延长受后句和最长时间限制，不能保证达到最短显示或速度目标。最终 cue 生成后冻结，继续处理和定向重翻仅替换译文。
+
+每个成功块独立原子保存，读取时重新验证；自然候选处拆小块后仍复用成功子块。管线与 ASR、翻译分别缓存。取消保留成功块，修改执行设置生成独立身份，仅改名称/说明不失效。所有请求的采样覆盖和 grammar 随预算裁剪保持，预览使用相同实际 tokenizer。
 
 ## 翻译流程
 
@@ -61,7 +71,7 @@ Core 定义领域模型、接口和纯逻辑，不引用 Avalonia 或 Infrastruc
 - `PromptBuilder` 使用有限变量白名单，一次替换并正确处理 JSON；不执行模板表达式，也不再解释原文中的大括号。预设和输出格式位于 Core 的生产类型，不另写一套 UI 专用规则。
 - 批量模板的批次受模板中条数与字符预算限制，单条模板固定请求一条。固定波次并发，前文取该波次开始时的稳定快照，避免完成顺序改变上下文和缓存身份。
 - `PromptProfile.BatchTranslation` 是单条/批量模式的唯一来源，输出协议由其推导；`ITranslationEngine` 不再声明输出格式。兼容 API、DeepSeek 与 `LocalTranslationEngine` 都可返回纯文本或 JSON，由编排器按模板交给统一校验器。本地并发默认 2、线上默认 4，范围均为 1～8，请求粒度与模板一致。本地复用 llama-server，经流式 completion 检查 EOS、输出长度、取消和超时。
-- `DesktopJobService` 以运行配置及模型/运行包文件版本判断是否可复用服务，版本只读取完整路径、大小及最后修改时间。同版本且 `/health` 可用时复用已有引擎，跳过运行程序能力检查与模型加载。冷启动时 `LlamaServerBinary` 检查帮助、版本、Vulkan 设备并核对运行包内容哈希；模型只持有读取句柄，不计算模型哈希或解析 GGUF metadata，不核对其架构/量化与预设。加载错误由 llama.cpp 报告，原始诊断经脱敏进入日志；媒体识别上传前完成本地就绪检查。`ModelFileVersion`、运行配置与运行包身份进入翻译缓存，协议版本为 `local-completion-file-version-v3`，保留旧缓存文件但不混用旧模型哈希身份。
+- `DesktopJobService` 以运行配置及模型/运行包文件版本判断是否可复用服务，版本只读取完整路径、大小及最后修改时间。同版本且 `/health` 可用时复用已有引擎，跳过运行程序能力检查与模型加载。冷启动时 `LlamaServerBinary` 检查帮助、版本、Vulkan 设备并核对运行包内容哈希；模型只持有读取句柄，不计算模型哈希或解析 GGUF metadata，不核对其架构/量化与预设。加载错误由 llama.cpp 报告，原始诊断经脱敏进入日志；媒体识别上传前完成本地就绪检查。`ModelFileVersion`、运行配置与运行包身份进入翻译缓存，协议版本为 `local-pipeline-completion-v4`，保留旧缓存文件但不混用旧模型哈希身份。
 - `LlamaServerSession` 用 `ProcessCommandRunner.CreateStartInfo` 创建无窗口进程，清除继承的 llama.cpp 参数覆盖；只监听 127.0.0.1，通过 `--port 0` 分配端口，关闭 Web UI 和浏览器跨域访问。指定 Vulkan 设备、GPU 卸载层数、slot 数及总上下文长度；禁用自动容量调整和共享 KV 池，核对 `/props` 的每 slot 上下文与容量。GPU 证据仅来自本次进程的模型加载日志，必须具备选定 Vulkan 设备、GPU 模型缓冲及非零层卸载。
 - `PromptBuilder` 统一渲染前文（原文及已有译文）、后文（仅原文）与当前字幕，JSON 保留可读中文；默认前文 5 条、后文 2 条，共享字符预算。`TranslationRequest.PromptContext` 保留模板与参考条目，`EmbeddedPromptBudget.PrepareAsync` 经服务端 `/apply-template` 与 `/tokenize` 使用实际 tokenizer 逐条移除较远参考内容，不截断当前字幕或指令；参考全部移除仍超限时抛出 `PromptCapacityException`；编排器递归拆分批次，直到可执行或单条仍超限并明确失败，不截断/丢弃当前字幕。本地请求预览经同一裁剪和 chat template 返回实际提示词及 token 数；`/completion` 接收这份最终提示词，保证预算和预览与生成一致。
 - 成功译文校验后持久化，每批结束发布 `TranslationProgress` 中的有效 cue 和失败 ID。桌面合并交错通知，不让晚到快照清掉已显示的成功译文。
@@ -79,22 +89,22 @@ Core 定义领域模型、接口和纯逻辑，不引用 Avalonia 或 Infrastruc
 | `Page` / `Step` | 页面导航与三步位置；与业务进度分开 |
 | `Settings`、提示词编辑字段 | 设置页草稿；编辑本身不改变已有结果 |
 | `_savedSettings` | 最后成功保存的非敏感配置快照 |
-| `TaskSourceLanguage`、`TaskTargetLanguage`、`TaskProviderIndex` | 工作台本次任务选项，默认值来自已保存设置；源语言同时映射识别代码与翻译名称 |
+| `TaskSourceLanguage`、`TaskTargetLanguage`、`TaskProviderIndex`、`TaskPipeline` | 本次选项，默认来自已保存配置/模型关联；快照 TaskPipelineId 保存本次覆盖，不修改模型默认值 |
 | `_jobSettings`、`_jobInputPath` | 实际任务启动时的配置和文件，结果预览、重翻及导出依据 |
 | `LocalModelId`、`ModelFiles`、`ModelPath`、`ModelSha256` | 选中预设、各模型路径及下载来源哈希、当前路径及下载哈希；手动选择清空哈希，历史哈希不参与运行前校验或缓存身份；保存后进入任务快照 |
-| `PromptLibrary` / `ModelPromptBindings` | 自定义模板库、模型到模板 ID 的关联；内置模板在 Core 中提供，删除时移除对该模板的显式关联，各模型回退自己的默认模板，关联与删除通过同一配置原子保存 |
-| `SelectedPrompt` / 提示词编辑字段 | 独立编辑对象与草稿，不随模型切换；列表筛选选择与实际编辑对象分开，未保存切换先恢复原高亮并等待模态保存/放弃/取消，保存失败保持原草稿 |
+| `PipelineLibrary` / `ModelPipelineBindings` | 自定义管线、模型到默认管线 ID 的关联；内置在 Core，删除移除显式引用并回退模型默认值，同一配置原子保存 |
+| `SelectedPipeline` / 步骤编辑字段 | 独立草稿，不随模型切换；包含分句、翻译提示词及参数，阶段切换仅导航；未保存管线切换提供保存/放弃/取消 |
 | `Rows` / `CueSelection` | 字幕及 `SelectionModel<CueRow>` 多选；区分等待、翻译中、失败、取消，原文和时间保持稳定；行替换后按 ID 恢复选择，新任务清空选择 |
 | `IsBusy` / `_isMediaJob` / cancellation | 串行保护长操作，区分媒体处理与服务测试 |
 | `IsPreparing` / `PreparationStatus` / `PreparationElapsed` | 本次准备或服务测试的真实阶段与计时；工作台/设置复用固定状态视图，阶段通过 UI dispatcher 更新，完成/取消/关闭后停止计时并拒绝陈旧通知 |
 | `ElevenLabsKey` / `TranslationKey` | 解锁后的编辑字段，翻译字段按当前设置 provider 映射；非 AppSettings 成员 |
 | `CredentialStore` / `IsCredentialBusy` | 加密文件、会话派生密钥、三个服务凭证和串行凭证操作；启动默认锁定 |
 
-任务启动从已保存配置复制，再覆盖本次选项。保存设置只更新默认配置，未保存的修改不进入媒体处理请求。服务测试是设置页的显式动作，校验并使用当前设置草稿；提示词只校验当前引擎和所选模型，未选模板不能阻止当前服务测试。保存与加载配置仍完整校验所有模板，错误标明模板名称；测试不改变已完成任务状态或导出资格。
+任务启动复制已保存配置并覆盖本次选项。保存设置只影响新任务，服务测试显式使用当前草稿和所选管线翻译阶段；只校验当前管线，保存/加载完整校验全部库。继续处理使用原任务快照；最终 cue 已生成时只补译，不重新运行分句，也不恢复已失效的联合旧译文。
 
-`EmbeddedModel.DefaultPromptId` 只保存默认模板 ID：1.8B 使用简单模板，7B 使用上下文模板；线上默认通用批量模板。`PromptLibrary` 保存自定义模板完整内容，`ModelPromptBindings` 保存引用和模型显示名。本地关联键使用模型 ID，线上使用 provider、规范化实际端点与模型名的非敏感哈希。共享模板更新后新任务使用新内容；已启动任务深拷贝整个库和关联，保证预览/重翻仍使用原正文。不存在的引用和重复模板名称在保存前拒绝。内置模板不允许覆盖，副本使用独立 ID。
+`EmbeddedModel.DefaultPipelineId` 指定模型默认流程，默认线上联合、1.8B 直接、7B/Index 两步；用户可以更改关联或在任务覆盖。管线完整深拷贝进任务快照，名称/说明/ID 不参与执行缓存身份。各步骤共用任务模型，采样留空使用模型/服务默认值；本地 Index 默认 greedy 0/1/40/1，Hy 默认 .7/.6/20/1.05，均由阶段覆盖。llama-server 启用 Jinja 与 enable_thinking=false。
 
-`MainWindowViewModel.Inference` 投影当前引擎的并发数和线上可空的输出 token 数，配置继续分别存储 `LocalConcurrency`/`TranslationConcurrency`、`LocalMaximumTokens`/`MaximumTokens`，不改变 schema 或默认值；模型上下文容量减少时缩小超过半容量的本地输出值。准备流程通过 `LocalPreparationProgress` 从服务工厂、实际 llama-server 启动会话及测试请求上报阶段，时间戳用于阶段日志；UI dispatcher 排空当前通知后才移交识别或最终测试状态。阶段包括运行程序检查、进程启动、模型加载、服务检查、就绪及复用服务，不再包含模型校验。下载完整性校验只在下载流程执行。
+`MainWindowViewModel.Inference` 投影当前引擎的并发数和线上可空的输出 token 数，配置继续分别存储 `LocalConcurrency`/`TranslationConcurrency`、`LocalMaximumTokens`/`MaximumTokens`，仍复用原并发与默认输出字段；阶段采样覆盖另归管线；模型上下文容量减少时缩小超过半容量的本地输出值。准备流程通过 `LocalPreparationProgress` 从服务工厂、实际 llama-server 启动会话及测试请求上报阶段，时间戳用于阶段日志；UI dispatcher 排空当前通知后才移交识别或最终测试状态。阶段包括运行程序检查、进程启动、模型加载、服务检查、就绪及复用服务，不再包含模型校验。下载完整性校验只在下载流程执行。
 
 `SpeechLanguages` 维护 Scribe v2 官方语言名称与 ISO 639-1/639-3 映射。界面只显示中文源语言名称，区域标识兼容输入会转为语言代码；新版以显示语言统一对应识别代码；已有匹配的合法两位/三位代码可保留，不迁移旧 JSON。未选定源语言时省略 `language_code`。未知语言在上传前拒绝。
 
@@ -108,27 +118,28 @@ Core 定义领域模型、接口和纯逻辑，不引用 Avalonia 或 Infrastruc
 
 | 路径 | 内容 |
 | --- | --- |
-| `settings.json` | 非敏感设置、自定义提示词库和模型引用 |
+| `settings.json` | schema 3 非敏感设置、自定义管线库及模型默认引用 |
 | `credentials.json` / `credentials.lock` | 主密码加密凭证；后者为修改时的排他文件句柄，不包含秘密 |
 | `Jobs/<job-id>/` | 输入/音频/VAD/分片/识别记录及状态 |
-| `Translations/<identity>/` | 翻译批次、结果及状态 |
+| Pipelines/<identity>/ | 分句/联合逐块接受响应及最终 cue/词范围，取消保留成功块 |
+| Translations/<identity>/ | 翻译批次、结果及状态 |
 | `Working/` | 处理期间的临时输出 |
 | `llama.cpp/<tag>-<digest-prefix>/` | 独立版本的官方 Vulkan 运行包、对应 LICENSE 与 installation.json；不同版本不原地覆盖 |
 | `llama.cpp/package.zip.partial` / `.partial.json` / `package.download.lock` | 运行包片段、当次官方元数据和排他下载句柄 |
 | `<model-id>.gguf` | 本地模型默认文件；与配置文件同级，远端文件名变化不改变本地默认路径 |
 | `<model-id>.gguf.partial` / `.partial.json` / `.download.lock` | 下载片段、本次官方元数据和下载排他句柄；取消保留可续传片段 |
 
-识别与翻译缓存身份分开；翻译身份包含引擎非敏感签名、模板正文、批量方式及生效批次参数、语言、风格和原始 cue，批次请求还包含实际上下文。模板 ID、名称与说明不参与生成身份，仅重命名/改备注不失效缓存。API Key 不进入身份。配置拒绝高级 JSON 中受控或嵌套凭据字段，以及误贴的当前会话 Key。
+ASR、字幕管线与翻译缓存分开。管线身份包含引擎、词文本/时间/说话人、媒体时长、语言风格及执行设置，块身份包含实际提示词/采样/GBNF；翻译身份包含最终 cue、翻译阶段、语言风格及上下文。名称、说明及 ID 不参与身份，API Key 不进入任何身份。缓存读取重新验收，成功结果原子保存，锁文件防止同任务并写。
 
 原子写保护完整性，作业文件句柄提供互斥；锁文件仍在不表示作业仍被占用。缓存包含音频、原文、译文，不能当作可公开测试 fixture。迁移缓存格式要考虑身份变化、旧数据校验和重新计费影响。
 
-`ModelDownloadService` 从官方 API 动态发现指定量化的唯一 GGUF，不冻结远端版本、文件名、大小或哈希。续传只复用同一资产的片段，校验 Range；服务器忽略 Range 时重写片段。哈希与大小采用本次官方提供的信息，完整文件以原子移动替换，旧正式文件在下载失败时保留。手动选择文件动态核对官方当前资产；已保存模型使用已记录内容哈希离线校验，文件名不参与身份。
+`ModelDownloadService` 动态发现官方唯一量化 GGUF；续传仅复用同资产片段，校验 Range、大小、GGUF 文件头与可用 SHA 后原子替换，失败保留旧文件。手动文件不联网核对官方身份，也不计算内容哈希，延续 D018。
 
-`ConfigurationStore` 根据自身 Root 生成默认路径。settings.json schema 2 不迁移旧设置：读取缺失/较旧 schema 时备份为同目录 `settings.previous-<id>.json`，原子写入新版默认配置并提示重新配置；未来版本及损坏 JSON 报错且不覆盖。独立凭证、模型、运行包与缓存文件不清理。模型切换仅恢复各自路径/哈希及模板关联，不触碰独立编辑草稿。模型、采样与运行包身份进入引擎缓存签名；更换模板本身不重启 llama-server。
+`ConfigurationStore` 根据 Root 生成默认路径；schema 3 不迁移旧设置，备份较旧 JSON 后原子重建默认值。未来版本或损坏 JSON 不覆盖，凭证/模型/运行包/缓存保留。模型切换恢复自己的路径及默认关联，不触碰编辑草稿；改变管线不重启 llama-server。
 
 下载仍只修改设置草稿，保存后用于新任务；下载前释放闲置服务，处理中禁止下载或改模型，关闭等待推理再释放。GGUF 与运行包共用 `ResumableDownload`，保持动态修订、Range、取消和安全解压；独立运行包版本不原地覆盖。
 
-模型下拉仅提供两个预置模型，使用稳定 `ObservableCollection`，刷新路径和哈希不重建 ItemsSource。提示词列表按 ID 增删/替换条目，筛选不丢失编辑草稿，清除筛选可恢复选择。模型切换期间拒绝重复回写，配置更新结束后通知选择状态，避免双向绑定把临时选择再次写入配置。
+模型下拉提供三个预设并保持稳定集合；管线按 ID 更新，筛选不丢草稿，模型切换拒绝重复回写。
 
 ## 主密码凭证存储
 
@@ -150,6 +161,8 @@ Core 定义领域模型、接口和纯逻辑，不引用 Avalonia 或 Infrastruc
 
 ## 当前实现的明确限制
 
-云端地址、模型及生成参数目前由兼容接口与 DeepSeek 共用一组配置字段；提示词库与模型关联已独立，密钥已分为 ElevenLabs、兼容服务和 DeepSeek 三个独立槽位，翻译页按引擎显示对应输入。工作台可选 provider，但不代表已实现多个服务配置档案或多账户凭据管理。以后扩展这些能力需要独立计划并测试配置隔离，不能在交接中声称已经具备。
+失败任务的恢复当前始终使用旧 _jobSettings。返回选项更改 TaskPipeline 只更新界面选择，没有退出 CanContinue，导致新选择未应用；最终 cue 已生成时还会跳过分句。这是待修复的状态转换缺陷，不是“调整选项后重新处理”的产品设计。已知问题、隔离复现和临时操作见[验证状态](status.md#已知问题失败后调整管线未应用待修复)。
+
+云端地址、模型及生成参数目前由兼容接口与 DeepSeek 共用一组配置字段；字幕管线库与模型默认关联已独立，密钥已分为 ElevenLabs、兼容服务和 DeepSeek 三个独立槽位，翻译页按引擎显示对应输入。工作台可选 provider，但不代表已实现多个服务配置档案或多账户凭据管理。以后扩展这些能力需要独立计划并测试配置隔离，不能在交接中声称已经具备。
 
 运行日志保留最近 200 条；没有多账户管理、播放器或编辑器。真实服务/GPU证据与人工验收边界见[验证状态](status.md)。

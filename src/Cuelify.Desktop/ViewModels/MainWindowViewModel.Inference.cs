@@ -38,7 +38,7 @@ public partial class MainWindowViewModel
         }
     }
     public decimal LocalOutputTokenMaximum => Settings.ContextSize / 2;
-    public string ConcurrencyHint => "同时处理的翻译请求数；每个请求的字幕条数由提示词模板决定。" +
+    public string ConcurrencyHint => "同时处理的请求数；分句块与每批字幕条数由管线决定。" +
         (IsLocal ? "提高并发会增加显存占用。" : "提高并发可能触发服务限流。");
     public string TimeoutHint => IsLocal ? "每次翻译请求单独计时，不包含排队、模型加载和重试等待；服务启动与加载另设 5 分钟上限。" : "每次翻译请求单独计时，不包含排队和重试等待。";
     public string OutputTokensHint => IsLocal ? "每次请求的输出上限，不超过模型上下文容量的一半。批量翻译通常需要更大的输出上限。" : "每次请求的输出上限；留空使用服务默认值。批量翻译通常需要更大的输出上限。";

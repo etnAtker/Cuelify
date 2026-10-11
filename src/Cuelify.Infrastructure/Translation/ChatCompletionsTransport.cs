@@ -71,8 +71,8 @@ public sealed class OpenAiCompatibleTranslationEngine : ITranslationEngine
         _transport = new(http, apiKeyProvider);
     }
     public Task<TranslationResponse> TranslateAsync(TranslationRequest request, CancellationToken cancellationToken) =>
-        _transport.SendAsync(_options.Endpoint(), CloudRequestBuilder.Build(_options, request.Messages), _options.Timeout, cancellationToken);
-    public string Preview(TranslationRequest request) => CloudRequestBuilder.Build(_options, request.Messages).ToJsonString();
+        _transport.SendAsync(_options.Endpoint(), CloudRequestBuilder.Build(_options, request), _options.Timeout, cancellationToken);
+    public string Preview(TranslationRequest request) => CloudRequestBuilder.Build(_options, request).ToJsonString();
 }
 
 public sealed class DeepSeekOfficialProvider : ITranslationEngine
@@ -89,8 +89,8 @@ public sealed class DeepSeekOfficialProvider : ITranslationEngine
         _transport = new(http, apiKeyProvider);
     }
     public Task<TranslationResponse> TranslateAsync(TranslationRequest request, CancellationToken cancellationToken) =>
-        _transport.SendAsync(_options.Endpoint(), CloudRequestBuilder.Build(_options, request.Messages, _thinking), _options.Timeout, cancellationToken);
-    public string Preview(TranslationRequest request) => CloudRequestBuilder.Build(_options, request.Messages, _thinking).ToJsonString();
+        _transport.SendAsync(_options.Endpoint(), CloudRequestBuilder.Build(_options, request, _thinking), _options.Timeout, cancellationToken);
+    public string Preview(TranslationRequest request) => CloudRequestBuilder.Build(_options, request, _thinking).ToJsonString();
     public Task<TranslationResponse> TestConnectionAsync(CancellationToken cancellationToken) =>
         _transport.SendAsync(_options.Endpoint(), CloudRequestBuilder.Build(_options with { MaximumTokens = 128 }, [new("user", "请只回复 OK。")], _thinking), _options.Timeout, cancellationToken);
 }

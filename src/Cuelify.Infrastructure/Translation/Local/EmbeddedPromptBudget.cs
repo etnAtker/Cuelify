@@ -47,6 +47,6 @@ public static class EmbeddedPromptBudget
         var after = context.After;
         if (before.Count > after.Count) before = before.Skip(1).ToArray();
         else after = after.Take(after.Count - 1).ToArray();
-        return new PromptBuilder().Build(context.Profile, context.Settings, original.Cues, before, after);
+        return new PromptBuilder().Build(context.Profile, context.Settings, original.Cues, before, after) with { Parameters = original.Parameters, Grammar = original.Grammar };
     }
 }

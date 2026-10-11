@@ -43,7 +43,7 @@
       </StackPanel>
     </ScrollViewer>
     <ScrollViewer Grid.Row="3" IsVisible="{Binding IsOptionsStep}" HorizontalScrollBarVisibility="Disabled">
-      <StackPanel MaxWidth="680" HorizontalAlignment="Stretch" Spacing="12">
+      <StackPanel MaxWidth="680" HorizontalAlignment="Stretch" Spacing="8">
         <Border Classes="surface" Padding="16">
           <Grid ColumnDefinitions="*,Auto">
             <TextBlock FontWeight="SemiBold" Text="{Binding FileName}" TextWrapping="Wrap" />
@@ -61,11 +61,14 @@
           <TextBlock Text="翻译引擎" />
           <ComboBox ItemsSource="{Binding ProviderNames}" SelectedIndex="{Binding TaskProviderIndex}" HorizontalAlignment="Stretch" AutomationProperties.Name="本次翻译引擎" />
         </StackPanel>
+        <StackPanel Spacing="8" IsEnabled="{Binding CanConfigure}">
+          <TextBlock Text="本次字幕管线" />
+          <ComboBox x:Name="TaskPipelineSelector" ItemsSource="{Binding TaskPipelineItems}" SelectedItem="{Binding TaskPipeline}" HorizontalAlignment="Stretch" AutomationProperties.Name="本次字幕管线" />
+        </StackPanel>
         <Grid ColumnDefinitions="*,Auto">
-          <StackPanel Spacing="6"><TextBlock Classes="muted" Text="{Binding TaskServiceSummary}" /><TextBlock Classes="muted" Text="{Binding TaskPromptSummary}" /></StackPanel>
-          <StackPanel Grid.Column="1" Spacing="8" Orientation="Horizontal"><Button Content="服务设置" Command="{Binding ConfigureTranslationCommand}" /><Button Content="编辑提示词" Command="{Binding ConfigurePromptCommand}" /></StackPanel>
+          <TextBlock Classes="muted" Text="{Binding TaskServiceSummary}" TextWrapping="Wrap" />
+          <StackPanel Grid.Column="1" Spacing="8" Orientation="Horizontal"><Button Content="服务设置" Command="{Binding ConfigureTranslationCommand}" /><Button Content="编辑管线" Command="{Binding ConfigurePromptCommand}" /></StackPanel>
         </Grid>
-        <TextBlock Classes="muted" Text="音频将发送至 ElevenLabs。选择云端翻译时，字幕原文也会发送至对应服务，可能产生费用。" />
       </StackPanel>
     </ScrollViewer>
     <Grid Grid.Row="3" RowDefinitions="Auto,Auto,*" IsVisible="{Binding IsResultsStep}">
@@ -98,6 +101,7 @@
     </Grid>
     <StackPanel Grid.Row="4">
       <views:PreparationStatusView x:Name="WorkspacePreparation" />
+      <TextBlock x:Name="UploadNotice" Classes="muted" IsVisible="{Binding IsOptionsStep}" Text="音频上传至 ElevenLabs；云端翻译会发送字幕原文，可能产生费用。" TextWrapping="Wrap" Margin="0,12,0,0" />
       <Grid ColumnDefinitions="*,Auto" Margin="0,20,0,0">
         <StackPanel Orientation="Horizontal" Spacing="12">
           <Button Content="上一步" Command="{Binding FileStepCommand}" IsVisible="{Binding IsOptionsStep}" />

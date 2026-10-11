@@ -25,7 +25,7 @@ public sealed class LlamaWorkflowTests
         await fixture.Store.SaveAsync(settings, []);
         var loaded = await fixture.Store.LoadAsync();
         Assert.Equal(1, loaded!.TranslationConcurrency); Assert.Equal(2, loaded.LocalConcurrency);
-        Assert.Equal(PromptPresets.SingleSimple, loaded.GetProfile());
+        Assert.Equal(SubtitlePipelinePresets.Direct, loaded.GetPipeline());
         Assert.Equal(fixture.Store.DefaultLlamaServerPath, loaded.LlamaServerPath);
     }
 

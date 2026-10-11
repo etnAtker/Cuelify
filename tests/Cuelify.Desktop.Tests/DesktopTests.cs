@@ -269,12 +269,12 @@ public sealed class DesktopTests
     {
         using var fixture = new Fixture();
         var settings = fixture.Store.CreateDefaults(); settings.TargetLanguage = "日文"; settings.Provider = TranslationProvider.Local;
-        var custom = PromptPresets.SingleContext with { Id = "custom-local", Name = "我的本地模板" };
-        settings.SavePrompt(custom); settings.AssociatePrompt(custom.Id);
+        var custom = SubtitlePipelinePresets.TwoStage with { Id = "custom-local", Name = "我的本地模板" };
+        settings.SavePipeline(custom); settings.AssociatePipeline(custom.Id);
         await fixture.Store.SaveAsync(settings, ["secret-eleven", "secret-ds"]);
         var loaded = await fixture.Store.LoadAsync();
         Assert.Equal("日文", loaded!.TargetLanguage);
-        Assert.Equal("我的本地模板", loaded.GetProfile().Name);
+        Assert.Equal("我的本地模板", loaded.GetPipeline().Name);
         var text = await File.ReadAllTextAsync(Path.Combine(fixture.Root, "settings.json"));
         Assert.DoesNotContain("secret-eleven", text); Assert.DoesNotContain("secret-ds", text);
         Assert.DoesNotContain("ApiKey", text); Assert.DoesNotContain("TranslationKey", text);
@@ -293,7 +293,7 @@ public sealed class DesktopTests
     {
         using var fixture = new Fixture();
         var settings = new AppSettings();
-        settings.SavePrompt(PromptPresets.BatchSubtitles with { Id = "secret-test", Name = "误贴模板", SystemTemplate = "secret-from-session" });
+        settings.SavePipeline(SubtitlePipelinePresets.Joint with { Id = "secret-test", Name = "误贴管线", Segmentation = new("secret-from-session", "翻译") });
         await Assert.ThrowsAsync<ArgumentException>(() => fixture.Store.SaveAsync(settings, ["secret-from-session"]));
     }
     [AvaloniaFact]
@@ -786,6 +786,14 @@ internal sealed class FakeJobs : IDesktopJobService
         var translated = cues.Select(cue => force is not null && !force.Contains(cue.Id) ? cue : cue with { TranslatedText = Partial && cue.Id == "cue-2" ? null : RetranslatedText ?? "中文译文" }).ToArray();
         return new TranslationResult(translated, translated.Where(cue => cue.TranslatedText is null).Select(cue => cue.Id).ToArray(), 0, 0)
         { FailureReasons = FailureReason is null ? new Dictionary<string, string>() : new Dictionary<string, string> { ["cue-2"] = FailureReason } };
+    }
+    public bool JointComplete;
+    public int Generations;
+    public AppSettings? GenerationSettings;
+    public Task<SubtitlePipelineResult> GenerateCuesAsync(TranscriptionResult source, AppSettings settings, string key, IProgress<TranslationProgress> progress, CancellationToken token)
+    {
+        GenerationSettings = settings; Generations++;
+        return Task.FromResult(new SubtitlePipelineResult(JointComplete ? source.Cues.Select(c => c with { TranslatedText = "联合译文" }).ToArray() : source.Cues, [], 0, 0));
     }
     public async Task<string> TestEngineAsync(AppSettings settings, string key, CancellationToken token, IProgress<Cuelify.Infrastructure.Translation.Local.LocalPreparationProgress>? progress = null)
     {

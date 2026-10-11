@@ -13,8 +13,8 @@ public partial class SettingsView : UserControl
     {
         // 模态确认期间立即恢复高亮；模型仍保留原选择和草稿。
         if (sender is ListBox list && DataContext is MainWindowViewModel model && !model.CanManagePrompts &&
-            !Equals(list.SelectedItem, model.VisibleSelectedPrompt))
-            list.SetCurrentValue(SelectingItemsControl.SelectedItemProperty, model.VisibleSelectedPrompt);
+            !Equals(list.SelectedItem, model.VisibleSelectedPipeline))
+            list.SetCurrentValue(SelectingItemsControl.SelectedItemProperty, model.VisibleSelectedPipeline);
     }
     private void OnPromptVariableGotFocus(object? sender, GotFocusEventArgs args)
     {
