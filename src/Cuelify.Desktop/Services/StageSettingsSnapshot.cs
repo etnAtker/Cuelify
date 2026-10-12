@@ -25,7 +25,7 @@ public static class StageSettingsSnapshot
             var pipeline = settings.GetPipeline();
             var definition = JsonSerializer.SerializeToNode(pipeline)!.AsObject();
             var fields = kind == TaskStage.Subtitles
-                ? new[] { "Name", "Id", "Method", "Segmentation", "BlockSeconds", "ContextCharacters", "MaximumCueSeconds", "MinimumCueSeconds" }
+                ? new[] { "Name", "Id", "Method", "Segmentation", "SegmentationFormat", "BlockSeconds", "ContextCharacters", "MaximumCueSeconds", "MinimumCueSeconds" }
                 : ["Name", "Id", "Method", "Translation", "TranslationParameters", "BeforeCues", "AfterCues", "MaximumContextCharacters", "LineCharacters", "ReadingCharactersPerSecond"];
             var own = new JsonObject(); foreach (var name in fields) own[name] = definition[name]?.DeepClone();
             // 快照使用独立 ID，内置管线后续变更不会覆盖已执行的版本。

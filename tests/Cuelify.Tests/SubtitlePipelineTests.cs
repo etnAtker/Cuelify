@@ -10,13 +10,14 @@ namespace Cuelify.Tests;
 
 public sealed class SubtitlePipelineTests
 {
+    private static SubtitlePipelineProfile Legacy => SubtitlePipelinePresets.TwoStage with { SegmentationFormat = SegmentationOutputFormat.WordEnds };
     private static WordToken[] Words(int count = 8) => Enumerable.Range(0, count).Select(i =>
         new WordToken($"台词{i}。", TimeSpan.FromSeconds(i * 6), TimeSpan.FromSeconds(i * 6 + 5), null)).ToArray();
 
     [Fact]
     public void BoundariesCannotLoseRepeatReorderWordsOrCrossMaximumDuration()
     {
-        var words = Words(); var pipe = SubtitlePipelinePresets.TwoStage;
+        var words = Words(); var pipe = Legacy;
         var block = PipelinePromptBuilder.Plan(words, pipe)[0];
         Assert.Equal(4, block.Last);
         var parsed = PipelinePromptBuilder.Parse("{\"ends\":[0,1,2,3,4]}", words, block, pipe);
@@ -32,7 +33,7 @@ public sealed class SubtitlePipelineTests
         WordToken[] words = [new("你好", TimeSpan.Zero, TimeSpan.FromSeconds(1), null), new("。", TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1), null),
             new("嗯。", TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2.1), null)];
         SourceWordRange[] segments = [new(0, 1), new(2, 2)];
-        var (cues, ranges) = PipelineDisplay.Build(words, segments, SubtitlePipelinePresets.TwoStage, TimeSpan.FromSeconds(4));
+        var (cues, ranges) = PipelineDisplay.Build(words, segments, Legacy, TimeSpan.FromSeconds(4));
         Assert.Equal("你好。嗯。", string.Concat(cues.Select(c => c.SourceText)));
         Assert.Equal(new SourceWordRange(0, 1), ranges[0]); Assert.Equal(TimeSpan.FromSeconds(2.7), cues[1].End);
         Assert.True(cues[0].End <= cues[1].Start); Assert.Equal(TimeSpan.FromSeconds(2.1), words[^1].End);
@@ -46,7 +47,7 @@ public sealed class SubtitlePipelineTests
         var root = Path.Combine(Path.GetTempPath(), "Cuelify-pipeline-" + Guid.NewGuid().ToString("N"));
         try
         {
-            var pipe = SubtitlePipelinePresets.TwoStage with { Method = mode };
+            var pipe = Legacy with { Method = mode };
             var words = Words(); var engine = new Engine();
             var service = new SubtitlePipelineOrchestrator(engine, root);
             var first = await service.GenerateAsync(words, [], TimeSpan.FromSeconds(48), pipe, new());
@@ -79,7 +80,7 @@ public sealed class SubtitlePipelineTests
         using var cancel = new CancellationTokenSource();
         try
         {
-            var pipe = SubtitlePipelinePresets.TwoStage with { BlockSeconds = 5 };
+            var pipe = Legacy with { BlockSeconds = 5 };
             var engine = new Engine() { CancelOnCall = 2, Cancellation = cancel };
             var service = new SubtitlePipelineOrchestrator(engine, root);
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.GenerateAsync(Words(4), [], TimeSpan.FromSeconds(24), pipe, new() { Concurrency = 1 }, token: cancel.Token));
@@ -123,9 +124,9 @@ public sealed class SubtitlePipelineTests
         try
         {
             var engine = new CorrectingEngine(); var service = new SubtitlePipelineOrchestrator(engine, root);
-            var result = await service.GenerateAsync(Words(2), [], TimeSpan.FromSeconds(12), SubtitlePipelinePresets.TwoStage, new() { RetryDelay = TimeSpan.Zero });
+            var result = await service.GenerateAsync(Words(2), [], TimeSpan.FromSeconds(12), Legacy, new() { RetryDelay = TimeSpan.Zero });
             Assert.Equal(2, result.EngineCalls); Assert.Equal(2, result.Cues.Count);
-            Assert.Equal(0, (await service.GenerateAsync(Words(2), [], TimeSpan.FromSeconds(12), SubtitlePipelinePresets.TwoStage, new())).EngineCalls);
+            Assert.Equal(0, (await service.GenerateAsync(Words(2), [], TimeSpan.FromSeconds(12), Legacy, new())).EngineCalls);
         }
         finally { Directory.Delete(root, true); }
     }
@@ -135,7 +136,7 @@ public sealed class SubtitlePipelineTests
     {
         WordToken[] words = [new("你好", TimeSpan.Zero, TimeSpan.FromSeconds(1), "a"), new("是的", TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(2), "b"),
             new("再见", TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(6), "b")];
-        var profile = SubtitlePipelinePresets.TwoStage;
+        var profile = Legacy;
         var block = PipelinePromptBuilder.Plan(words, profile)[0];
         Assert.Equal(3, PipelinePromptBuilder.Parse("{\"ends\":[0,1,2]}", words, block, profile).Count);
         Assert.Single(PipelinePromptBuilder.Parse("{\"ends\":[2]}", words, block, profile));
@@ -181,7 +182,7 @@ public sealed class SubtitlePipelineTests
     public async Task FailedBlockRetryReusesSuccessAndRecordsRetryAfterLimitFailure()
     {
         using var directory = new TestDirectory();
-        var pipe = SubtitlePipelinePresets.TwoStage with { BlockSeconds = 5 };
+        var pipe = Legacy with { BlockSeconds = 5 };
         var engine = new Engine() { FailureOnCall = 2 };
         var service = new SubtitlePipelineOrchestrator(engine, directory.Path);
         var settings = new TranslationSettings { Concurrency = 1, MaximumAttempts = 2, RetryDelay = TimeSpan.Zero, MaximumRetryDelay = TimeSpan.Zero };

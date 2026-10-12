@@ -45,9 +45,12 @@ public sealed record SubtitlePipelineProfile(string Name, SegmentationMethod Met
     public double MinimumCueSeconds { get; init; } = .7;
     public int LineCharacters { get; init; } = 22;
     public double ReadingCharactersPerSecond { get; init; } = 12;
-    [JsonIgnore] public object SegmentationIdentity => new { Method, Segmentation = Method == SegmentationMethod.Model ? Segmentation : null,
+    public SegmentationOutputFormat SegmentationFormat { get; init; }
+    [JsonIgnore] public object SegmentationIdentity => SegmentationFormat == SegmentationOutputFormat.WordEnds || Method == SegmentationMethod.Program
+        ? new { Method, Segmentation = Method == SegmentationMethod.Model ? Segmentation : null,
         BlockSeconds = Method == SegmentationMethod.Model ? BlockSeconds : 0, ContextCharacters = Method == SegmentationMethod.Model ? ContextCharacters : 0,
-        MaximumCueSeconds, MinimumCueSeconds };
+        MaximumCueSeconds, MinimumCueSeconds }
+        : new { Method, Segmentation, BlockSeconds, ContextCharacters, MaximumCueSeconds, MinimumCueSeconds, SegmentationFormat };
     [JsonIgnore] public PromptProfile EffectiveTranslation => Translation with { Parameters = TranslationParameters,
         MaximumTextCharacters = LineCharacters * 2, ReadingCharactersPerSecond = ReadingCharactersPerSecond };
     [JsonIgnore] public object TranslationIdentity => new { Translation = EffectiveTranslation.ExecutionIdentity,
@@ -67,6 +70,7 @@ public sealed record SubtitlePipelineProfile(string Name, SegmentationMethod Met
             !double.IsFinite(MinimumCueSeconds) || MinimumCueSeconds < 0 || MinimumCueSeconds > MaximumCueSeconds)
             throw new ArgumentException("分句配置无效，请检查分块、上下文及字幕时长。");
         if (Method == SegmentationMethod.Program) return;
+        if (!Enum.IsDefined(SegmentationFormat)) throw new ArgumentException("分句输出格式无效。");
         if (Segmentation is null || BlockSeconds is < 5 or > 180 || ContextCharacters is < 0 or > 5000)
             throw new ArgumentException("模型分句的分块或上下文配置无效。");
         Segmentation.Parameters.Validate();
@@ -93,6 +97,7 @@ public static class SubtitlePipelinePresets
     { Id = "pipeline-direct", Description = "程序分句，再独立翻译。", Translation = PromptPresets.SingleSimple };
     public static readonly SubtitlePipelineProfile TwoStage = new("模型分句后翻译", SegmentationMethod.Model)
     { Id = "pipeline-two-stage", Description = "模型选择自然分句，再独立翻译。", Translation = PromptPresets.BatchSubtitles with { BatchSize = 25 },
+        SegmentationFormat = SegmentationOutputFormat.SourceTexts,
         TranslationParameters = new() { MaximumTokens = 2048 } };
     public static IReadOnlyList<SubtitlePipelineProfile> All { get; } = [Direct, TwoStage];
     public static bool IsBuiltIn(string id) => All.Any(profile => profile.Id == id);

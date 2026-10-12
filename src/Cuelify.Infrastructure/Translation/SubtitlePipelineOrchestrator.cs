@@ -8,13 +8,26 @@ using System.Collections.Concurrent;
 
 namespace Cuelify.Infrastructure.Translation;
 
-public sealed class SubtitlePipelineOrchestrator(ITranslationEngine engine, string cacheRoot, string? fallbackCacheRoot = null)
+public sealed partial class SubtitlePipelineOrchestrator(ITranslationEngine engine, string cacheRoot, string? fallbackCacheRoot = null)
 {
-    public async Task<SubtitlePipelineResult> GenerateAsync(IReadOnlyList<WordToken> words, IReadOnlyList<SubtitleCue> originalCues,
+    public Task<SubtitlePipelineResult> GenerateAsync(IReadOnlyList<WordToken> words, IReadOnlyList<SubtitleCue> originalCues,
+        TimeSpan duration, SubtitlePipelineProfile profile, TranslationSettings settings,
+        IProgress<TranslationProgress>? progress = null, CancellationToken token = default, IReadOnlySet<string>? retryBlocks = null) =>
+        profile.Method == SegmentationMethod.Model && profile.SegmentationFormat == SegmentationOutputFormat.SourceTexts
+            ? GenerateTextsAsync(words, duration, profile, settings, progress, token, retryBlocks)
+            : GenerateLegacyAsync(words, originalCues, duration, profile, settings, progress, token, retryBlocks);
+
+    private async Task<SubtitlePipelineResult> GenerateLegacyAsync(IReadOnlyList<WordToken> words, IReadOnlyList<SubtitleCue> originalCues,
         TimeSpan duration, SubtitlePipelineProfile profile, TranslationSettings settings,
         IProgress<TranslationProgress>? progress = null, CancellationToken token = default, IReadOnlySet<string>? retryBlocks = null)
     {
-        if (profile.Method == SegmentationMethod.Program) return ProgramSegmentation.Build(words, duration, profile);
+        if (profile.Method == SegmentationMethod.Program)
+        {
+            token.ThrowIfCancellationRequested(); progress?.Report(new("BuildingCues", []));
+            var generated = ProgramSegmentation.Build(words, duration, profile);
+            progress?.Report(new("CuesReady", []) { Cues = generated.Cues, WorkProgress = new(words.Count, words.Count) { Unit = "词" } });
+            return generated;
+        }
         settings.Validate();
         var blocks = PipelinePromptBuilder.Plan(words, profile);
         var identity = AtomicFile.Hash(new { engine.CacheIdentity, Profile = profile.SegmentationIdentity,
@@ -22,6 +35,7 @@ public sealed class SubtitlePipelineOrchestrator(ITranslationEngine engine, stri
         var directory = Path.Combine(cacheRoot, identity); Directory.CreateDirectory(directory);
         await using var jobLock = new FileStream(Path.Combine(directory, "pipeline.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
         var results = new IReadOnlyList<SourceWordRange>[blocks.Count];
+        var progressGate = new object(); var completedWords = 0;
         var processing = "Segmenting";
         var requests = new ConcurrentDictionary<PipelineWordBlock, TranslationRequest>();
         var unitIds = new ConcurrentDictionary<PipelineWordBlock, string>();
@@ -42,13 +56,20 @@ public sealed class SubtitlePipelineOrchestrator(ITranslationEngine engine, stri
         {
             token.ThrowIfCancellationRequested();
             await Task.WhenAll(Enumerable.Range(offset, Math.Min(settings.Concurrency, blocks.Count - offset)).Select(async i =>
-                results[i] = await Process(blocks[i])));
+            {
+                results[i] = await Process(blocks[i]);
+                lock (progressGate)
+                {
+                    completedWords += blocks[i].Last - blocks[i].First + 1;
+                    progress?.Report(new("Segmenting", []) { WorkProgress = new(completedWords, words.Count) });
+                }
+            }));
         }
         var (cues, ranges) = PipelineDisplay.Build(words, results.SelectMany(r => r).ToArray(), profile, duration);
         _ = SrtSerializer.SerializeSource(cues);
         var result = new SubtitlePipelineResult(cues, ranges, calls, hits);
         await AtomicFile.WriteJsonAsync(Path.Combine(directory, "result.json"), result, CancellationToken.None);
-        progress?.Report(new("CuesReady", []) { Cues = cues });
+        progress?.Report(new("CuesReady", []) { Cues = cues, WorkProgress = new(words.Count, words.Count) });
         return result;
 
         async Task<IReadOnlyList<SourceWordRange>> Process(PipelineWordBlock block)

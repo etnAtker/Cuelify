@@ -10,6 +10,7 @@ public sealed record TranslationProgress(string Stage, IReadOnlyList<string> Cue
     public IReadOnlyDictionary<string, Cuelify.Core.Projects.ProcessingState>? UnitStates { get; init; }
     public IReadOnlyList<SubtitleCue>? Cues { get; init; }
     public IReadOnlyList<string>? FailedIds { get; init; }
+    public Cuelify.Core.Projects.StageWorkProgress? WorkProgress { get; init; }
 }
 public sealed class TranslationOrchestrator(ITranslationEngine engine, string? cacheRoot = null, string? fallbackCacheRoot = null)
 {

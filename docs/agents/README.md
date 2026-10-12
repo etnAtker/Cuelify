@@ -31,7 +31,7 @@ Cuelify 的 Agent 专用资料统一保存在 `docs/agents/`，这里是后续�
 | --- | --- |
 | 项目、持久化、分步重试、恢复 | 产品范围、架构中的项目执行与依赖版本、D021/D022/D024/D025、StageVersionStore/StepVersion/IndependentStageMigration/ProjectStore/ProjectWorkflow 测试 |
 | 媒体、分片、时码、ASR | 产品范围、架构中的识别流程、核心与转写测试 |
-| 字幕管线、翻译、提示词、上下文、缓存 | 产品范围、架构中的管线与翻译流程、D024/D025 及其替代决策、GenerationContract/PipelineIsolation/管线与翻译测试 |
+| 字幕管线、翻译、提示词、上下文、缓存 | 产品范围、架构中的管线与翻译流程、D024/D025/D026 及其替代决策、GenerationContract/TextSegmentation/PipelineIsolation/管线与翻译测试 |
 | 本地模型、原生 DLL、GPU | D014/D016/D018 决策、开发指南、本地模型与 Vulkan 测试、验证状态 |
 | 主密码与密钥 | 产品范围、架构中的主密码存储、UI 规约、D013 决策、凭证存储与桌面流程测试 |
 | 页面、命令、设置、错误提示 | UI 与文案规约、架构中的桌面状态、D006/D007/D022 决策、桌面测试 |

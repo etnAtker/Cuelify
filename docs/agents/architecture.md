@@ -54,11 +54,13 @@ Core 定义领域模型、接口和纯逻辑，不引用 Avalonia 或 Infrastruc
 
 TaskStagePlan 固定分片→识别词→分句→结果，与分句方法、模型及提供商无关。ProgramSegmentation 复用 CueBuilder，并保留零时长词处理；SubtitlePipelineOrchestrator 只执行模型分句。两者均输出纯原文 SubtitlePipelineResult（Cues/Ranges），结果步骤只读取该结果并调用 TranslationOrchestrator；移除所有从 ASR 直接联合生成结果的执行分支。
 
-`PipelinePromptBuilder` 按原词时间分块，各起点允许所有满足最长字幕时间的末词 ID。没有标点白名单、日语助词、首词字符、逗号时长、说话人或固定停顿阈值的硬筛选。请求附连贯原文、词表、紧凑末词范围及参考前后文。每个分块保存 GenerationOutputContract，编排复用契约、请求及单元身份，ParseRanges 验收完整合法范围；本地 OutputGrammarCompiler 编译该契约为 GBNF，Core 不携带 grammar 字符串。翻译契约包含格式、固定 ID 和长度，Align 复用 AlignmentValidator 保留有效部分。云端返回后使用相同验收，校验失败附原因并有限重试；提供商能力映射不选择流程或分句算法。
+`PipelinePromptBuilder` 按原词时间规划窗口，各起点允许所有满足最长字幕时间的末词 ID，没有标点、助词、说话人或固定停顿的硬筛选。新请求附连贯原文、以块起点为原点的紧凑时间词表和参考前后文，模型只输出 texts 原文数组。GenerationOutputContract 保存该块的原词文字与全部合法范围，ParseRanges 逐字映射连续词 ID 并验收时间；本地 OutputGrammarCompiler 将同一图的每条边编译为对应原文 JSON 字符串，Core 不携带 GBNF。云端同样验收，失败附具体原因并有限重试。旧快照的 WordEnds 契约与旧提示词、并发、缓存身份保留；新执行捕获 SourceTexts，字段缺失的旧快照不会被默默改用新算法。
 
 PipelineDisplay 从模型选择的连续词范围计算纯原文 cue，合并重叠/同起点文字，在可用静音内延长显示并生成最终 ID。ProgramSegmentation 保留 CueBuilder 对零时长词的处理，再在可用静音内满足最短显示目标。原词时码不修改；最终 cue 在分句版本中固定，翻译只替换译文并按两行目标换行，不再以译文长度调整时间。
 
-每个成功块独立原子保存并重新验收；按原词范围拆小块后复用成功子块。SegmentationIdentity 与 TranslationIdentity 分别描述本步参数，Core 请求的 OutputContract 随上下文预算裁剪保留。分句身份不包含翻译提示词、批次、行宽和阅读速度；翻译身份不包含分句提示词、候选规划或分块参数。名称、说明、ID 不影响执行身份。
+新分句采用 `segmentation-texts-v1` 缓存身份，每个成功请求独立原子保存完整响应。块间按依赖顺序执行：除末块或单条响应外，确认前面各句，将最后一句连同后文再次请求；容量不足先缩小当前请求并保存 `.capacity.json`，未处理后半随暂存末句进入后续窗口。恢复从原词起点重新验收成功响应，确定相同的确认范围和暂存尾句，成功请求不重复发送。动态剩余工作单元使界面区分继续和失败重试，取消/失败不将暂存词计为完成；单词请求仍超限则明确失败。翻译请求并发不变，模型 slot 配置仍按既有模型档案分配。
+
+SegmentationIdentity 与 TranslationIdentity 分别描述本步参数，分句身份包含输出格式而不包含翻译提示词、批次、行宽和阅读速度；翻译身份不包含分句提示词、候选规划或分块参数。名称、说明、ID 不影响执行身份。旧 `segmentation-v3` 缓存和既有结果保留，继续/失败重试读取固定快照，重新执行才采用当前格式。
 
 ## 翻译流程
 

@@ -52,6 +52,8 @@ public sealed class ConfigurationStore(string? root = null)
         }
         if (version != AppSettings.CurrentSchemaVersion) throw new InvalidDataException("设置文件版本高于当前应用，请使用对应版本的应用。");
         var settings = JsonSerializer.Deserialize<AppSettings>(json) ?? throw new InvalidDataException("设置文件内容无效。");
+        foreach (var (id, pipeline) in settings.PipelineLibrary.ToArray())
+            if (pipeline.Method == SegmentationMethod.Model) settings.PipelineLibrary[id] = pipeline with { SegmentationFormat = SegmentationOutputFormat.SourceTexts };
         PopulateModels(settings);
         Validate(settings);
         return settings;

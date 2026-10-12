@@ -9,6 +9,7 @@ namespace Cuelify.Tests;
 
 public sealed class GenerationContractTests
 {
+    private static SubtitlePipelineProfile Legacy => SubtitlePipelinePresets.TwoStage with { SegmentationFormat = SegmentationOutputFormat.WordEnds };
     [Fact]
     public void ModelCanChooseUnpunctuatedParticleAndShortCommaBoundaries()
     {
@@ -16,7 +17,7 @@ public sealed class GenerationContractTests
             new("の", TimeSpan.FromSeconds(1.3), TimeSpan.FromSeconds(2), "a"),
             new("続き,", TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2.2), "b"),
             new("本文", TimeSpan.FromSeconds(4.3), TimeSpan.FromSeconds(5), "b")];
-        var profile = SubtitlePipelinePresets.TwoStage;
+        var profile = Legacy;
         var block = PipelinePromptBuilder.Plan(words, profile).Single();
         Assert.Equal(4, PipelinePromptBuilder.Parse("{\"ends\":[0,1,2,3]}", words, block, profile).Count);
         Assert.Single(PipelinePromptBuilder.Parse("{\"ends\":[3]}", words, block, profile));
@@ -32,7 +33,7 @@ public sealed class GenerationContractTests
             new("見", TimeSpan.FromSeconds(1339.192), TimeSpan.FromSeconds(1339.192), null),
             new("て", TimeSpan.FromSeconds(1339.332), TimeSpan.FromSeconds(1339.332), null),
             new("。", TimeSpan.FromSeconds(1339.332), TimeSpan.FromSeconds(1339.332), null)];
-        var profile = SubtitlePipelinePresets.TwoStage;
+        var profile = Legacy;
         var block = PipelinePromptBuilder.Plan(words, profile).Single();
         Assert.Equal([new SourceWordRange(0, 1), new SourceWordRange(2, 5)],
             PipelinePromptBuilder.Parse("{\"ends\":[1,5]}", words, block, profile));
@@ -71,7 +72,7 @@ public sealed class GenerationContractTests
     {
         using var directory = new TestDirectory(); var engine = new Engine();
         WordToken[] words = [new("你好。", TimeSpan.Zero, TimeSpan.FromSeconds(1), null)];
-        var service = new SubtitlePipelineOrchestrator(engine, directory.Path); var pipeline = SubtitlePipelinePresets.TwoStage;
+        var service = new SubtitlePipelineOrchestrator(engine, directory.Path); var pipeline = Legacy;
         await service.GenerateAsync(words, [], TimeSpan.FromSeconds(2), pipeline, new());
         var changed = pipeline with { Translation = pipeline.Translation with { UserTemplate = "改变翻译 {cues_json}" }, LineCharacters = 30 };
         var cached = await service.GenerateAsync(words, [], TimeSpan.FromSeconds(2), changed, new());

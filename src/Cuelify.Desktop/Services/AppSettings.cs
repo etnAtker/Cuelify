@@ -95,6 +95,7 @@ public partial class AppSettings : ObservableObject
     }
     public void SavePipeline(SubtitlePipelineProfile profile)
     {
+        if (profile.Method == SegmentationMethod.Model) profile = profile with { SegmentationFormat = SegmentationOutputFormat.SourceTexts };
         profile.Validate();
         if (SubtitlePipelinePresets.IsBuiltIn(profile.Id)) throw new ArgumentException("内置管线不可修改，请先创建副本。");
         if (AllPipelines.Any(other => other.Id != profile.Id && other.Name.Equals(profile.Name, StringComparison.OrdinalIgnoreCase)))
@@ -138,7 +139,16 @@ public partial class AppSettings : ObservableObject
             if (result.Provider == TranslationProvider.Local && ModelFiles.TryGetValue(result.LocalOptions().ModelId, out var file))
             { result.ModelPath = file.Path; result.ModelSha256 = file.Sha256; }
         }
+        if (kind == Cuelify.Core.Projects.TaskStage.Subtitles) result.UseSourceTextSegmentation();
         return result;
+    }
+    public void UseSourceTextSegmentation()
+    {
+        var pipeline = GetPipeline();
+        if (pipeline.Method == SegmentationMethod.Model && pipeline.SegmentationFormat == SegmentationOutputFormat.WordEnds)
+        {
+            PipelineLibrary[pipeline.Id] = pipeline with { SegmentationFormat = SegmentationOutputFormat.SourceTexts };
+        }
     }
     public string? StepModelId(Cuelify.Core.Projects.TaskStage kind, Cuelify.Core.Projects.MediaTaskDocument? task = null) =>
         ExecutionModels.GetValueOrDefault(kind) ?? task?.ModelOverrides.GetValueOrDefault(kind) ??

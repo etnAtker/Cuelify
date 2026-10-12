@@ -93,6 +93,7 @@ public partial class MainWindowViewModel
         // 旧媒体缺少选项时兼容原项目快照；新媒体始终保存添加时的全局默认值。
         var result = ConfigurationStore.ReadSnapshot(item.Document.Options) ?? ConfigurationStore.ReadSnapshot(SelectedProject?.DefaultSettings) ?? SavedWorkspaceSettings;
         result = ConfigurationStore.Snapshot(result);
+        result.UseSourceTextSegmentation();
         result.ModelFiles = new(_savedSettings.ModelFiles);
         foreach (var model in _savedSettings.Models) result.Models[model.Key] = model.Value;
         foreach (var pipeline in _savedSettings.AllPipelines)
