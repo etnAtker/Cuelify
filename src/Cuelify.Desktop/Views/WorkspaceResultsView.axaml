@@ -1,4 +1,4 @@
-<UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:vm="using:Cuelify.Desktop.ViewModels" x:Class="Cuelify.Desktop.Views.WorkspaceResultsView" x:DataType="vm:ProjectWorkspaceViewModel">
+<UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:vm="using:Cuelify.Desktop.ViewModels" xmlns:views="using:Cuelify.Desktop.Views" x:Class="Cuelify.Desktop.Views.WorkspaceResultsView" x:DataType="vm:ProjectWorkspaceViewModel">
   <UserControl.Styles><Style Selector="ListBox#CueList ListBoxItem"><Setter Property="Padding" Value="8,4" /><Setter Property="MinHeight" Value="0" /></Style></UserControl.Styles>
   <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,*">
     <Grid Margin="0,0,0,4">
@@ -10,7 +10,7 @@
     <ItemsControl x:Name="StepActions" Grid.Row="1" ItemsSource="{Binding StepOperations}" IsEnabled="{Binding CanProcess}" Margin="0,0,0,4" AutomationProperties.Name="本步骤操作"><ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel><ItemsControl.ItemTemplate><DataTemplate x:DataType="vm:ProcessChoice"><Button Content="{Binding Name}" ToolTip.Tip="{Binding Reason}" Command="{Binding $parent[UserControl].((vm:ProjectWorkspaceViewModel)DataContext).StepOperationCommand}" CommandParameter="{Binding}" Margin="0,0,6,4" /></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
     <Grid Grid.Row="2" ColumnDefinitions="*,Auto,Auto" Margin="0,0,0,4">
       <ComboBox x:Name="VersionSelector" ItemsSource="{Binding Versions}" SelectedItem="{Binding Version}" IsVisible="{Binding HasVersions}" HorizontalAlignment="Stretch" AutomationProperties.Name="步骤版本"><ComboBox.ItemTemplate><DataTemplate x:DataType="vm:ResultVersion"><TextBlock Text="{Binding Label}" TextTrimming="CharacterEllipsis" /></DataTemplate></ComboBox.ItemTemplate></ComboBox>
-      <TextBlock Text="未开始" IsVisible="{Binding !HasVersions}" Classes="muted" VerticalAlignment="Center" />
+      <TextBlock x:Name="EmptyVersionState" Text="{Binding CurrentVersionText}" IsVisible="{Binding !HasVersions}" Classes="muted" VerticalAlignment="Center" />
       <Button Grid.Column="1" x:Name="SetCurrentButton" Content="设为当前" Command="{Binding SetCurrentCommand}" IsVisible="{Binding HasVersions}" Margin="8,0,0,0" />
       <Button Grid.Column="2" x:Name="ExportButton" Content="{Binding ExportText}" Command="{Binding ExportCommand}" IsVisible="{Binding CanExport}" Margin="8,0,0,0" />
     </Grid>
@@ -21,6 +21,8 @@
     </Grid>
     <Grid Grid.Row="3" ColumnDefinitions="Auto,*,Auto" IsVisible="{Binding ShowWords}" Margin="0,0,0,4"><TextBlock Text="ElevenLabs 模型" VerticalAlignment="Center" Margin="0,0,8,0" /><TextBox Grid.Column="1" Text="{Binding SpeechModel}" AutomationProperties.Name="识别模型" /><Button Grid.Column="2" Content="保存模型" Command="{Binding SaveSpeechModelCommand}" Margin="8,0,0,0" /></Grid>
     <StackPanel Grid.Row="4" Spacing="4" Margin="0,0,0,4">
+      <StackPanel x:Name="StepProgress" IsVisible="{Binding HasStepProgress}"><views:ProgressStatusView DataContext="{Binding Progress}" /></StackPanel>
+      <views:ProgressStatusView DataContext="{Binding LoadingProgress}" />
       <TextBlock Text="{Binding ResultSettings}" Classes="muted" FontSize="11" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding ResultSettings}" />
       <Expander Header="本步骤的问题" IsVisible="{Binding HasResultError}"><StackPanel Spacing="6"><TextBlock Text="{Binding ResultError}" Classes="error" TextWrapping="Wrap" /><ItemsControl ItemsSource="{Binding FailedUnits}"><ItemsControl.ItemTemplate><DataTemplate x:DataType="vm:FailedUnitRow"><StackPanel><TextBlock Text="{Binding Name}" /><TextBlock Text="{Binding Reason}" Classes="error" TextWrapping="Wrap" /></StackPanel></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel></Expander>
     </StackPanel>

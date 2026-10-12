@@ -131,6 +131,25 @@ public partial class ProjectWorkspaceViewModel : ObservableObject
     [ObservableProperty] private bool resumeBatch;
     [ObservableProperty] private bool keepResumeSettings = true;
     [ObservableProperty] private string activeText = "";
+    private string? _progressMediaId;
+    private TaskStage _progressStage;
+    private StageWorkProgress? _activeWork;
+    private string _progressMessage = "";
+    public OperationProgressViewModel Progress => _owner.Activity;
+    public OperationProgressViewModel LoadingProgress { get; } = new();
+    public bool HasActiveProgress => _activeWork is { Total: > 0 };
+    public double ActiveProgressPercent => _activeWork?.Percent ?? 0;
+    public bool HasStepProgress => _owner.IsProcessing && _progressMediaId == _mediaId && _progressStage == ResultStage &&
+        (Version is null || Version.Record.Version == _task?.Stage(ResultStage).Version);
+    public string ActiveProgressText
+    {
+        get
+        {
+            if (_activeWork is not { } work) return "";
+            return OperationProgressViewModel.Format(work with { ShowWaiting = work.ShowWaiting || _progressStage == TaskStage.Asr }, ProgressUnit);
+        }
+    }
+    private string ProgressUnit => _progressStage switch { TaskStage.Asr or TaskStage.Chunking => "片", TaskStage.Translation => "条", _ => "词" };
     public bool HasDialog => DialogKind.Length > 0;
     public bool NameDialog => DialogKind is "new" or "rename";
     public bool SettingsDialog => DialogKind == "settings";
@@ -154,7 +173,7 @@ public partial class ProjectWorkspaceViewModel : ObservableObject
     public bool ShowTranslation => ResultStage == TaskStage.Translation;
     public bool NeedsModel => ResultStage == TaskStage.Translation || ResultStage == TaskStage.Subtitles && _segmentationMethod != SegmentationMethod.Program;
     public bool CanSetCurrent => _owner.CanManageProject && Version is { Record.Archived: false } && _task?.Stage(ResultStage).Version != Version.Record.Version;
-    public string CurrentVersionText => Version is null ? "未开始" : Version.Record.Version == _task?.Stage(ResultStage).Version ? "当前版本" : "预览历史版本";
+    public string CurrentVersionText => Version is null ? HasStepProgress ? "正在处理" : "未开始" : Version.Record.Version == _task?.Stage(ResultStage).Version ? "当前版本" : "预览历史版本";
     public IAsyncRelayCommand SetCurrentCommand { get; }
     public IAsyncRelayCommand<ProcessChoice> StepOperationCommand { get; }
     public IAsyncRelayCommand SaveStepModelCommand { get; }
@@ -182,6 +201,8 @@ public partial class ProjectWorkspaceViewModel : ObservableObject
     public string[] SourceLanguages => _owner.SourceLanguageNames;
     public void Refresh()
     {
+        _owner.RefreshActivityVisibility();
+        foreach (var name in new[] { nameof(HasActiveProgress), nameof(ActiveProgressPercent), nameof(ActiveProgressText), nameof(HasStepProgress) }) OnPropertyChanged(name);
         foreach (var name in new[] { nameof(CanSubmit), nameof(HasProjects), nameof(HasWords), nameof(HasChunks), nameof(HasCues), nameof(HasVersions), nameof(HasFailedUnits),
             nameof(CanRetranslateSelected), nameof(ExportText), nameof(BatchSummary), nameof(HasInterruptedBatch), nameof(HasRemovedMedia), nameof(SourceMissing), nameof(HasResultError), nameof(EmptySubtitleText), nameof(ShowSubtitleTools), nameof(CanProcess) }) OnPropertyChanged(name);
         foreach (var name in new[] { nameof(ShowWords), nameof(ShowChunks), nameof(ShowCues), nameof(ShowTranslation), nameof(NeedsModel), nameof(CanSetCurrent), nameof(CurrentVersionText) }) OnPropertyChanged(name);
@@ -283,6 +304,7 @@ public partial class ProjectWorkspaceViewModel : ObservableObject
     }
     private async Task LoadVersionsAsync()
     {
+        using var feedback = _owner.BeginFeedback("正在读取步骤版本…");
         var revision = ++_resultRevision; var task = _task; var projectId = _projectId; var kind = ResultStage;
         if (task is null || projectId is null) return;
         var versions = await _store.VersionsAsync(projectId, task, kind, matchingUpstreamOnly: true);
@@ -296,6 +318,9 @@ public partial class ProjectWorkspaceViewModel : ObservableObject
     }
     private async Task LoadVersionAsync(ResultVersion? selected, int? existingRevision = null)
     {
+        LoadingProgress.ReduceMotion = _owner.Settings.ReduceMotion;
+        using var localFeedback = LoadingProgress.Begin("正在读取步骤结果…");
+        using var feedback = _owner.BeginFeedback("正在读取步骤结果…");
         var revision = existingRevision ?? ++_resultRevision; var task = _task; var projectId = _projectId; var kind = ResultStage;
         if (task is null || projectId is null) return;
         var words = new List<WordRow>(); var chunks = new List<ChunkRow>(); var failures = new List<FailedUnitRow>(); IReadOnlyList<CueRow> cues = [];
@@ -355,11 +380,23 @@ public partial class ProjectWorkspaceViewModel : ObservableObject
     }
     public void ApplyProgress(MediaTaskItem item, ProjectTaskProgress progress)
     {
+        var reset = _progressMediaId != item.Document.Id || _progressStage != progress.Stage || progress.Message == "开始处理" ||
+            progress.Stage == TaskStage.Chunking && _progressMessage != progress.Message;
+        if (reset) _activeWork = null;
+        _progressMediaId = item.Document.Id; _progressStage = progress.Stage;
+        _progressMessage = progress.Message;
+        if (progress.WorkProgress is not null) _activeWork = progress.WorkProgress;
+        _owner.UpdateTaskActivity(ActiveText, _activeWork is null ? null : _activeWork with { ShowWaiting = _activeWork.ShowWaiting || progress.Stage == TaskStage.Asr }, ProgressUnit, reset);
+        Refresh();
         if (item.Document.Id != _mediaId || progress.Cues is null || !ShowCues || Version is { Current: false }) return;
         if (progress.Stage != ResultStage) return;
         _allCues = progress.Cues.Select((cue, index) => new CueRow(cue, index + 1)
         { State = progress.FailedIds?.Contains(cue.Id) == true ? CueTranslationState.Failed : CueTranslationState.Translating }).ToArray();
         CanExport = false; FilterCues();
+    }
+    internal void ResetProgress()
+    {
+        _activeWork = null; _progressMediaId = null; Refresh();
     }
     private void CaptureTarget()
     { _dialogProject = _owner.SelectedProject; _dialogMedia = _owner.SelectedMedia; DialogError = ""; }

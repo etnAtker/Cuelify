@@ -43,8 +43,26 @@ public sealed class TranslationOrchestrator(ITranslationEngine engine, string? c
         int calls = 0, hits = 0;
         var builder = new PromptBuilder();
         var batches = PlanValidated(cues, settings);
-        progress?.Report(new("Translating", []) { UnitStates = cues.ToDictionary(c => c.Id, _ => Cuelify.Core.Projects.ProcessingState.NotStarted) });
         if (forceCueIds?.Count == 0) forceCueIds = null;
+        var scope = cues.Where(c => forceCueIds is null || forceCueIds.Contains(c.Id)).Select(c => c.Id).ToHashSet(StringComparer.Ordinal);
+        var progressGate = new object(); var running = new HashSet<string>(StringComparer.Ordinal);
+        void ReportWork(string stage, IReadOnlyList<string>? ids = null, bool includeCues = false)
+        {
+            lock (progressGate)
+            {
+                foreach (var id in ids ?? []) running.Add(id);
+                progress?.Report(new(stage, ids ?? [])
+                {
+                    Cues = includeCues ? cues.Select(c => c with { TranslatedText = translations.GetValueOrDefault(c.Id) }).ToArray() : null,
+                    FailedIds = includeCues ? failures.Keys.Where(id => !translations.ContainsKey(id) && !running.Contains(id)).ToArray() : null,
+                    WorkProgress = new(scope.Count(translations.ContainsKey), scope.Count,
+                        scope.Count(id => running.Contains(id) && !translations.ContainsKey(id)),
+                        scope.Count(id => failures.ContainsKey(id) && !translations.ContainsKey(id) && !running.Contains(id))) { Unit = "条", ShowWaiting = true }
+                });
+            }
+        }
+        progress?.Report(new("Translating", []) { UnitStates = cues.ToDictionary(c => c.Id, _ => Cuelify.Core.Projects.ProcessingState.NotStarted),
+            WorkProgress = new(0, scope.Count) { Unit = "条", ShowWaiting = true } });
         try
         {
             if (forceCueIds is not null)
@@ -85,6 +103,7 @@ public sealed class TranslationOrchestrator(ITranslationEngine engine, string? c
             { FailureReasons = failures.Where(item => !translations.ContainsKey(item.Key)).ToDictionary(item => item.Key, item => item.Value) };
             await AtomicFile.WriteJsonAsync(Path.Combine(directory, "result.json"), result, CancellationToken.None);
             await Status(result.IsComplete ? "Completed" : "PartialFailure", CancellationToken.None);
+            ReportWork(result.IsComplete ? "Completed" : "PartialFailure", includeCues: true);
             return result;
         }
         catch (Exception exception)
@@ -106,11 +125,8 @@ public sealed class TranslationOrchestrator(ITranslationEngine engine, string? c
             try { await ProcessBatch(batch, snapshot); }
             finally
             {
-                progress?.Report(new("Translating", [])
-                {
-                    Cues = cues.Select(cue => cue with { TranslatedText = translations.GetValueOrDefault(cue.Id) }).ToArray(),
-                    FailedIds = failures.Keys.Where(id => !translations.ContainsKey(id)).ToArray()
-                });
+                lock (progressGate) foreach (var cue in batch) running.Remove(cue.Id);
+                ReportWork("Translating", includeCues: true);
             }
         }
 
@@ -137,7 +153,7 @@ public sealed class TranslationOrchestrator(ITranslationEngine engine, string? c
             {
                 try
                 {
-                    progress?.Report(new("Translating", batch.Select(cue => cue.Id).ToArray()));
+                    ReportWork("Translating", batch.Select(cue => cue.Id).ToArray());
                     var response = await SendWithRetry(request);
                     var aligned = Parse(response.Content, batch);
                     foreach (var item in aligned.Translations) { accepted[item.Key] = item.Value; translations[item.Key] = item.Value; }
@@ -197,7 +213,7 @@ public sealed class TranslationOrchestrator(ITranslationEngine engine, string? c
                 cancellationToken.ThrowIfCancellationRequested();
                 try
                 {
-                    progress?.Report(new("TargetedRetry", [cue.Id]));
+                    ReportWork("TargetedRetry", [cue.Id]);
                     // 单条失败最多 attempts 次；transport 暂时失败也占此预算。
                     Interlocked.Increment(ref calls);
                     var response = await engine.TranslateAsync(request, cancellationToken);
@@ -207,6 +223,7 @@ public sealed class TranslationOrchestrator(ITranslationEngine engine, string? c
                         await AtomicFile.WriteJsonAsync(path, new CachedTranslations(new Dictionary<string, string> { [cue.Id] = text }), CancellationToken.None);
                         translations[cue.Id] = text;
                         failures.TryRemove(cue.Id, out _);
+                        ReportWork("Translating", includeCues: true);
                         return;
                     }
                     failures[cue.Id] = "译文或 ID 校验失败";
@@ -238,7 +255,7 @@ public sealed class TranslationOrchestrator(ITranslationEngine engine, string? c
             var delay = TimeSpan.FromTicks((long)Math.Min(settings.MaximumRetryDelay.Ticks, settings.RetryDelay.Ticks * Math.Pow(2, attempt - 1)));
             if (exception is TranslationServiceException { RetryAfter: { } retryAfter } && retryAfter > delay) delay = retryAfter;
             if (delay > settings.MaximumRetryDelay) return false;
-            progress?.Report(new("RetryWaiting", []));
+            ReportWork("RetryWaiting");
             await Task.Delay(delay, cancellationToken);
             return true;
         }

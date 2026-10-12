@@ -35,10 +35,12 @@ public partial class MainWindowViewModel
     }
     private IProgress<ModelDownloadProgress> LlamaProgress(CancellationToken token) => new Progress<ModelDownloadProgress>(value => Post(token, () =>
     {
-        LlamaInstallIndeterminate = value.TotalBytes is null or 0 || value.Stage != "下载中";
+        LlamaInstallIndeterminate = value.TotalBytes is null or 0;
         LlamaInstallPercent = value.TotalBytes is > 0 ? Math.Clamp(100d * value.Bytes / value.TotalBytes.Value, 0, 100) : 0;
         LlamaInstallStatus = value.Stage == "下载中" ? $"已下载 {value.Bytes / 1_000_000d:F1} MB" +
             (value.TotalBytes is { } total ? $" / {total / 1_000_000d:F1} MB" : "") : value.Stage;
+        Activity.Update(value.Stage == "下载中" ? "正在下载 llama.cpp…" : value.Stage,
+            new(value.Bytes, value.TotalBytes ?? 0) { Unit = value.Unit }, reset: true);
     }));
 
     [RelayCommand(CanExecute = nameof(CanConfigure))]
@@ -62,6 +64,7 @@ public partial class MainWindowViewModel
             await RunLlamaOperationAsync(async token =>
             {
                 LlamaInstallStatus = "检查运行程序与 Vulkan 支持…";
+                Activity.Update(LlamaInstallStatus, reset: true);
                 var binary = await Task.Run(() => _packages.InspectAsync(path, token), token);
                 ApplyLlamaServer(binary.Path, binary.Version);
                 LlamaInstallStatus = "运行程序检查通过。保存设置后用于新的处理，可测试本地翻译。";
@@ -84,6 +87,7 @@ public partial class MainWindowViewModel
         {
             await ExecuteAsync(async token =>
             {
+                Activity.Update("正在准备 llama.cpp…", reset: true);
                 try { await action(token); }
                 catch (OperationCanceledException) when (token.IsCancellationRequested)
                 { LlamaInstallStatus = "已取消，可继续下载或重新选择。"; throw; }

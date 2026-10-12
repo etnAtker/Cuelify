@@ -1,4 +1,5 @@
 using Cuelify.Core.Media;
+using Cuelify.Core.Projects;
 using Cuelify.Core.Speech;
 using Cuelify.Infrastructure.Media;
 using Cuelify.Infrastructure.Storage;
@@ -18,10 +19,13 @@ public sealed class ChunkingPipeline(IAudioProcessor audio, IVoiceActivityDetect
         IProgress<TranscriptionProgress>? progress = null, CancellationToken token = default, bool restart = false)
     {
         options.Validate(); inputPath = Path.GetFullPath(inputPath);
+        IProgress<StageWorkProgress> Observe(string stage) => new InlineProgress<StageWorkProgress>(value =>
+            progress?.Report(new(stage) { WorkProgress = value }));
+        progress?.Report(new("SourceChecking"));
         await using var inputGuard = new FileStream(inputPath, FileMode.Open, FileAccess.Read, FileShare.Read);
         var input = new FileInfo(inputPath);
         var fingerprint = new { Path = inputPath, input.Length, ModifiedUtc = input.LastWriteTimeUtc,
-            Sha256 = await AtomicFile.HashFileAsync(inputPath, token), FfmpegAudioProcessor.PreparationVersion };
+            Sha256 = await AtomicFile.HashFileAsync(inputPath, token, Observe("SourceChecking")), FfmpegAudioProcessor.PreparationVersion };
         var jobId = AtomicFile.Hash(fingerprint);
         var shared = Path.Combine(cacheRoot, jobId); Directory.CreateDirectory(shared);
         await using var jobLock = new FileStream(Path.Combine(shared, "job.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
@@ -32,13 +36,13 @@ public sealed class ChunkingPipeline(IAudioProcessor audio, IVoiceActivityDetect
         var preparation = await AtomicFile.ReadJsonAsync<AudioCache>(Path.Combine(shared, "audio.json"), token);
         PreparedAudio prepared;
         if (preparation is not null && File.Exists(pcmPath) && new FileInfo(pcmPath).Length == preparation.Bytes &&
-            await AtomicFile.HashFileAsync(pcmPath, token) == preparation.Sha256)
+            await AtomicFile.HashFileAsync(pcmPath, token, Observe("AudioChecking")) == preparation.Sha256)
             prepared = new(pcmPath, preparation.Duration);
         else
         {
             var media = await audio.ProbeAsync(inputPath, token);
-            prepared = await audio.PrepareAsync(inputPath, media, pcmPath, token);
-            preparation = new(prepared.Duration, new FileInfo(pcmPath).Length, await AtomicFile.HashFileAsync(pcmPath, token));
+            prepared = await audio.PrepareAsync(inputPath, media, pcmPath, token, Observe("AudioPreparing"));
+            preparation = new(prepared.Duration, new FileInfo(pcmPath).Length, await AtomicFile.HashFileAsync(pcmPath, token, Observe("AudioChecking")));
             await AtomicFile.WriteJsonAsync(Path.Combine(shared, "audio.json"), preparation, token);
         }
         var vadKey = AtomicFile.Hash(new { preparation.Sha256, vadSignature });
@@ -50,7 +54,7 @@ public sealed class ChunkingPipeline(IAudioProcessor audio, IVoiceActivityDetect
         {
             progress?.Report(new("VadAnalyzing"));
             await using var pcm = File.OpenRead(pcmPath);
-            detected = new(await vad.DetectAsync(pcm, token));
+            detected = new(await vad.DetectAsync(pcm, token, Observe("VadAnalyzing")));
             await AtomicFile.WriteJsonAsync(vadPath, detected, CancellationToken.None);
         }
         progress?.Report(new("ChunkPlanning"));
@@ -62,6 +66,7 @@ public sealed class ChunkingPipeline(IAudioProcessor audio, IVoiceActivityDetect
             chunks = new AudioChunkPlanner().Plan(prepared.Duration, detected.Regions, planner);
             var chunkDirectory = Path.Combine(directory, "chunks-" + AtomicFile.Hash(chunks)); Directory.CreateDirectory(chunkDirectory);
             files = [];
+            progress?.Report(new("ChunkPlanning") { WorkProgress = new(0, chunks.Count) { Unit = "片" } });
             AudioChunk? oversized = null; long oversizedBytes = 0;
             foreach (var chunk in chunks)
             {
@@ -70,7 +75,7 @@ public sealed class ChunkingPipeline(IAudioProcessor audio, IVoiceActivityDetect
                 var metadataPath = path + ".json";
                 var cached = await AtomicFile.ReadJsonAsync<PreparedChunk>(metadataPath, token);
                 if (cached is not null && cached.Chunk == chunk && await ValidAsync(cached with { Path = path }, token))
-                { files.Add(cached with { Path = path }); continue; }
+                { files.Add(cached with { Path = path }); progress?.Report(new("ChunkPlanning") { WorkProgress = new(files.Count, chunks.Count) { Unit = "片" } }); continue; }
                 var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
                 try
                 {
@@ -85,7 +90,7 @@ public sealed class ChunkingPipeline(IAudioProcessor audio, IVoiceActivityDetect
                     files.Add(exported);
                 }
                 finally { if (File.Exists(temporary)) File.Delete(temporary); }
-                progress?.Report(new("ChunkPlanning", chunk.Index + 1, chunks.Count));
+                progress?.Report(new("ChunkPlanning", chunk.Index + 1, chunks.Count) { WorkProgress = new(files.Count, chunks.Count) { Unit = "片" } });
             }
             if (oversized is null) break;
             if (round == 3) throw new InvalidDataException("缩短分片后仍超过上传大小上限，请检查音频编码配置。");

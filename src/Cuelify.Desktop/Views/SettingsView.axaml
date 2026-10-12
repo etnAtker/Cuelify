@@ -88,7 +88,7 @@
               </WrapPanel>
               <TextBlock Classes="muted" Text="下载官方 Windows x64 Vulkan 运行包，解压到设置文件夹中的 llama.cpp/。也可选择完整运行包中的 llama-server.exe。" TextWrapping="Wrap" />
               <TextBlock Classes="muted" Text="{Binding LlamaRuntimeStatus}" TextWrapping="Wrap" />
-              <ProgressBar x:Name="LlamaInstallProgress" IsVisible="{Binding IsLlamaInstalling}" IsIndeterminate="{Binding LlamaInstallIndeterminate}" Value="{Binding LlamaInstallPercent}" Minimum="0" Maximum="100" />
+              <StackPanel IsVisible="{Binding IsLlamaInstalling}"><views:ProgressStatusView x:Name="LlamaInstallProgress" DataContext="{Binding Activity}" /></StackPanel>
               <TextBlock Classes="muted" Text="{Binding LlamaInstallStatus}" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite" />
               <TextBlock Text="本地模型" />
               <ComboBox x:Name="EmbeddedModelSelector" ItemsSource="{Binding EmbeddedModels}" SelectedItem="{Binding SelectedEmbeddedModel}" HorizontalAlignment="Stretch" AutomationProperties.Name="本地模型" />
@@ -97,7 +97,7 @@
               <Button Content="选择模型文件…" Command="{Binding ChooseModelCommand}" />
               <TextBlock Classes="muted" Text="下载的模型存放在配置文件所在文件夹，可取消并继续下载。" />
               <TextBlock Classes="muted" Text="{Binding ModelFileStatus}" />
-              <ProgressBar x:Name="ModelDownloadProgress" IsVisible="{Binding IsModelDownloading}" IsIndeterminate="{Binding ModelDownloadIndeterminate}" Value="{Binding ModelDownloadPercent}" Minimum="0" Maximum="100" />
+              <StackPanel IsVisible="{Binding IsModelDownloading}"><views:ProgressStatusView x:Name="ModelDownloadProgress" DataContext="{Binding Activity}" /></StackPanel>
               <TextBlock Classes="muted" Text="{Binding ModelDownloadStatus}" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite" />
               <TextBlock Text="模型文件路径" />
               <TextBox Text="{Binding Settings.ModelPath}" AutomationProperties.Name="模型文件路径" />
@@ -352,7 +352,6 @@
       <views:PreparationStatusView x:Name="SettingsPreparation" />
       <Grid ColumnDefinitions="*,Auto,Auto">
         <TextBlock Classes="muted" Text="{Binding SettingsFooterStatus}" VerticalAlignment="Center" TextWrapping="Wrap" Margin="0,0,12,0" />
-        <Button Grid.Column="1" Content="取消" Command="{Binding CancelCommand}" IsVisible="{Binding IsBusy}" Margin="0,0,12,0" />
         <Button x:Name="SettingsSaveButton" Grid.Column="2" Content="保存设置" Command="{Binding SaveSettingsCommand}" Classes="accent" />
       </Grid>
     </StackPanel>

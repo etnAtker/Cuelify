@@ -85,6 +85,10 @@ SegmentationIdentity 与 TranslationIdentity 分别描述本步参数，分句�
 
 ## 桌面状态与配置归属
 
+`OperationProgressViewModel` 管理一次显示操作的阶段、计数、用时、取消状态和通知序号；`ProgressStatusView` 与共享 `operation-progress` 样式供步骤、准备、下载、凭证和结果加载复用。主窗口 Activity 保留跨页面活动，后台媒体的进度只投影到匹配媒体/步骤/版本，历史读取使用独立局部等待且不覆盖后台活动。阶段未知总量使用等待，短 I/O 延迟显示；结束停止计时器，旧显示作用域不能关闭或修改新操作。StageWorkProgress 为非持久化进度事件，使用 long 字节/工作量及单位；配置和任务 schema 不变。
+
+ChunkingPipeline 将媒体/PCM 哈希、FFmpeg PCM 输出、Silero 已分析字节和已校验导出分片分别上报。ProgressStream 观察成功读写且不拥有底层流，回调限频；原有 SHA-256 与二进制处理契约不变。ElevenLabs 上报上传、等待响应及校验阶段，ASR 汇总仍以完成分片计算。TranslationOrchestrator 从已验收译文及本次处理 ID 范围汇总成功/处理中/失败/等待，容量拆批和重试不会增加分母；ProjectTaskService 透传统一计量。下载与完整性校验共用字节进度，运行包解压发布文件计数。导入逐个原子保存项目成员，取消不丢失先前成功添加项。
+
 `MainWindow` 是导航外壳，长期持有工作台、设置、日志三个 UserControl；它们共享窗口级 ViewModel。切页只改变可见页面，不重建 service、模型或作业。
 
 | 状态 | 归属与用途 |

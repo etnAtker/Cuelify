@@ -17,6 +17,25 @@ public sealed class ElevenLabsAsrTests
         """;
 
     [Fact]
+    public async Task UploadAndResponseValidationReportActualPhases()
+    {
+        using var directory = new TestDirectory(); var file = directory.File("upload.wav");
+        await File.WriteAllBytesAsync(file, new byte[100_000]); var phases = new List<string>();
+        using var handler = new FakeHandler(async (request, token) =>
+        {
+            Assert.Equal("AsrUploading", phases.Single());
+            await request.Content!.CopyToAsync(Stream.Null, token);
+            Assert.Equal("AsrWaiting", phases[^1]);
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(ResponseJson) };
+        });
+        using var http = new HttpClient(handler);
+        var transcript = await new ElevenLabsAsrClient(http, () => FakeKey).TranscribeAsync(file, CancellationToken.None,
+            new Cuelify.Infrastructure.Storage.InlineProgress<string>(phases.Add));
+        Assert.Equal(new[] { "AsrUploading", "AsrWaiting", "AsrValidating" }, phases);
+        Assert.Equal(2, transcript.Words.Count);
+    }
+
+    [Fact]
     public async Task SendsOfficialMultipartAndPreservesLocalWordTimes()
     {
         var file = Path.GetTempFileName();

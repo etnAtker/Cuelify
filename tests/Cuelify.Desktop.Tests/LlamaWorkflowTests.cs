@@ -1,6 +1,7 @@
 using Avalonia.Controls;
 using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
+using Avalonia.VisualTree;
 using Cuelify.Core.Translation;
 using Cuelify.Desktop.Services;
 using Cuelify.Desktop.Views;
@@ -98,7 +99,7 @@ public sealed class LlamaWorkflowTests
         var download = model.DownloadLlamaCommand.ExecuteAsync(null); await packages.Started.Task;
         await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => { }, Avalonia.Threading.DispatcherPriority.Background);
         window.UpdateLayout(); AvaloniaHeadlessPlatform.ForceRenderTimerTick(2);
-        Assert.True(view.FindControl<ProgressBar>("LlamaInstallProgress")!.IsEffectivelyVisible);
+        Assert.True(view.FindControl<ProgressStatusView>("LlamaInstallProgress")!.GetVisualDescendants().OfType<ProgressBar>().Single().IsEffectivelyVisible);
         Assert.False(view.FindControl<Button>("DownloadLlamaButton")!.IsEffectivelyEnabled);
         using var frame = window.CaptureRenderedFrame(); Assert.NotNull(frame);
         var output = Environment.GetEnvironmentVariable("CUELIFY_UI_ARTIFACTS");

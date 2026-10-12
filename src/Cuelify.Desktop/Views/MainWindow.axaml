@@ -20,8 +20,17 @@
       <views:LogsView x:Name="LogsPage" IsVisible="{Binding IsLogs}" />
       <views:SettingsView x:Name="SettingsPage" IsVisible="{Binding IsSettings}" />
     </Grid>
-    <Border Grid.Row="1" Grid.ColumnSpan="2" Background="{DynamicResource Brush.Surface}" BorderBrush="{DynamicResource Brush.Divider}" BorderThickness="0,1,0,0" Padding="20,8" IsVisible="{Binding IsProcessing}">
-      <Grid ColumnDefinitions="Auto,*,Auto,Auto"><ProgressBar Width="60" Height="4" IsIndeterminate="True" VerticalAlignment="Center" /><TextBlock x:Name="ActiveProgressMessage" Grid.Column="1" Text="{Binding Workspace.ActiveText}" Margin="12,0" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" /><Button Grid.Column="2" Content="查看媒体" Command="{Binding ViewActiveMediaCommand}" /><Button Grid.Column="3" Content="停止" Command="{Binding CancelCommand}" Margin="8,0,0,0" /></Grid>
+    <Border Grid.Row="1" Grid.ColumnSpan="2" Background="{DynamicResource Brush.Surface}" BorderBrush="{DynamicResource Brush.Divider}" BorderThickness="0,1,0,0" Padding="20,8" IsVisible="{Binding Activity.IsVisible}">
+      <Grid ColumnDefinitions="*,Auto,Auto,Auto" RowDefinitions="Auto,Auto,Auto,Auto">
+        <TextBlock x:Name="ActiveProgressMessage" Text="{Binding Activity.Message}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Margin="0,0,12,0" AutomationProperties.LiveSetting="Polite" />
+        <TextBlock Grid.Column="1" Text="{Binding Activity.Elapsed}" Classes="muted" VerticalAlignment="Center" Margin="0,0,12,0" />
+        <Button Grid.Column="2" Content="查看媒体" Command="{Binding ViewActiveMediaCommand}" IsVisible="{Binding IsProcessing}" />
+        <Button Grid.Column="2" Content="查看设置" Command="{Binding ShowSettingsCommand}" IsVisible="{Binding ShowActivitySettings}" />
+        <Button Grid.Column="3" Content="停止" Command="{Binding CancelCommand}" IsVisible="{Binding Activity.CanCancel}" Margin="8,0,0,0" />
+        <TextBlock x:Name="ActiveProgressCount" Grid.Row="1" Grid.ColumnSpan="4" Text="{Binding Activity.CountText}" IsVisible="{Binding Activity.HasCount}" TextWrapping="Wrap" Classes="muted" />
+        <TextBlock Grid.Row="2" Grid.ColumnSpan="4" Text="{Binding Activity.ExtraText}" IsVisible="{Binding Activity.HasExtra}" TextWrapping="Wrap" Classes="muted" />
+        <ProgressBar x:Name="ActiveProgressBar" Grid.Row="3" Grid.ColumnSpan="4" Classes="operation-progress" IsIndeterminate="{Binding Activity.IsIndeterminate}" Value="{Binding Activity.BarValue}" Maximum="100" Margin="0,4,0,0" />
+      </Grid>
     </Border>
     <Border Grid.Row="1" Grid.ColumnSpan="2" Padding="20,8" Background="{DynamicResource Brush.Surface}" IsVisible="{Binding HasPendingRun}"><Grid ColumnDefinitions="*,Auto"><TextBlock Text="{Binding PendingRunDescription}" VerticalAlignment="Center" /><Button Grid.Column="1" Content="取消待处理操作" Command="{Binding CancelPendingRunCommand}" /></Grid></Border>
     <views:WorkspaceDialogView Grid.RowSpan="2" Grid.ColumnSpan="2" IsVisible="{Binding HasDialog}" DataContext="{Binding Workspace}" />

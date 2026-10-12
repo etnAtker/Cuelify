@@ -141,6 +141,7 @@ public partial class MainWindowViewModel
     private async Task<bool> SaveCredentialSnapshotAsync(Task<bool> previous, CredentialValues values, long revision, bool needsConfirmation)
     {
         await previous;
+        using var feedback = BeginFeedback("正在加密保存密钥…");
         try
         {
             if (needsConfirmation) throw new InvalidOperationException("请先确认兼容服务密钥对应的新地址。");
@@ -181,6 +182,7 @@ public partial class MainWindowViewModel
     }
     private async Task GuardCredentialAsync(Func<CancellationToken, Task> action)
     {
+        using var feedback = BeginFeedback("正在处理凭证…");
         try { await _credentialSave; await action(_credentialCancellation.Token); }
         catch (Exception exception) { CredentialStatus = CredentialErrorMessages.FromException(exception); }
         finally { IsCredentialBusy = false; ResumePendingWorkspaceAction(); }

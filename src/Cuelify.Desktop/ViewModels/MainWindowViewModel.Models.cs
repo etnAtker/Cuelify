@@ -64,10 +64,12 @@ public partial class MainWindowViewModel
     }
     private IProgress<ModelDownloadProgress> ModelProgress(CancellationToken token) => new Progress<ModelDownloadProgress>(value => Post(token, () =>
     {
-        ModelDownloadIndeterminate = value.TotalBytes is null || value.TotalBytes == 0 || value.Stage != "下载中";
+        ModelDownloadIndeterminate = value.TotalBytes is null || value.TotalBytes == 0;
         ModelDownloadPercent = value.TotalBytes is > 0 ? Math.Clamp(100d * value.Bytes / value.TotalBytes.Value, 0, 100) : 0;
         ModelDownloadStatus = value.Stage == "下载中" ? $"已下载 {value.Bytes / 1_000_000d:F1} MB" +
             (value.TotalBytes is { } total ? $" / {total / 1_000_000d:F1} MB" : "") : value.Stage;
+        Activity.Update(value.Stage == "下载中" ? "正在下载模型…" : value.Stage,
+            new(value.Bytes, value.TotalBytes ?? 0) { Unit = value.Unit }, reset: true);
     }));
 
     [RelayCommand(CanExecute = nameof(CanConfigure))]
@@ -95,6 +97,7 @@ public partial class MainWindowViewModel
         {
             await ExecuteAsync(async token =>
             {
+                Activity.Update("正在准备模型下载…", reset: true);
                 try { await action(token); }
                 catch (OperationCanceledException) when (token.IsCancellationRequested)
                 { ModelDownloadStatus = "已取消，可继续下载或重新选择。"; throw; }

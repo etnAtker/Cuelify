@@ -1,6 +1,7 @@
 using Avalonia.Controls;
 using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
+using Avalonia.VisualTree;
 using Cuelify.Core.Translation;
 using Cuelify.Desktop.Services;
 using Cuelify.Desktop.Views;
@@ -128,7 +129,7 @@ public sealed class EmbeddedModelWorkflowTests
         Assert.True(button.IsEffectivelyVisible); Assert.True(button.IsEffectivelyEnabled); Assert.True(button.Bounds.Width > 0);
         var download = model.DownloadModelCommand.ExecuteAsync(null); await downloads.Started.Task;
         await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => { }, Avalonia.Threading.DispatcherPriority.Background);
-        var bar = view.FindControl<ProgressBar>("ModelDownloadProgress")!;
+        var bar = view.FindControl<ProgressStatusView>("ModelDownloadProgress")!.GetVisualDescendants().OfType<ProgressBar>().Single();
         Assert.True(bar.IsEffectivelyVisible); Assert.False(button.IsEffectivelyEnabled);
         window.UpdateLayout(); AvaloniaHeadlessPlatform.ForceRenderTimerTick(2);
         Assert.True(bar.Bounds.Height > 0);

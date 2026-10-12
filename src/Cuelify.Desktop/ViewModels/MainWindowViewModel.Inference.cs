@@ -93,6 +93,7 @@ public partial class MainWindowViewModel
         var started = timestamp ?? Stopwatch.GetTimestamp();
         FinishPreparationPhase(started, "已完成");
         _phaseStarted = started; _preparationPhase = message; PreparationStatus = message;
+        Activity.Update(message, reset: true);
         if (_isMediaJob && _mediaOperationTarget is not null) Workspace.ActiveText = _mediaOperationTarget.Name + " · " + message;
         if (_preparationEngineTest) EngineStatus = message;
         else Status = message;

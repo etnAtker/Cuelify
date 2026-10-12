@@ -31,6 +31,7 @@ public sealed class WindowDialogs(Window owner) : IWindowDialogs
     public async Task<bool> PasswordAsync(PasswordPurpose purpose, Func<string, string, Task> submit, CancellationToken token = default)
     {
         var model = new MasterPasswordViewModel(purpose, submit);
+        model.Progress.ReduceMotion = owner.DataContext is MainWindowViewModel main ? main.Settings.ReduceMotion : true;
         var dialog = new MasterPasswordDialog { DataContext = model, RequestedThemeVariant = owner.ActualThemeVariant };
         model.Completed += () => dialog.Close(true);
         model.Cancelled += () => dialog.Close(false);

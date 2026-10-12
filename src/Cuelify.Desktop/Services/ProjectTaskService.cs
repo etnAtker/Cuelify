@@ -9,7 +9,10 @@ using Cuelify.Infrastructure.Translation;
 namespace Cuelify.Desktop.Services;
 
 public sealed record ProjectTaskProgress(TaskStage Stage, string Message, IReadOnlyList<SubtitleCue>? Cues = null,
-    IReadOnlyList<string>? FailedIds = null, IReadOnlyList<string>? CueIds = null);
+    IReadOnlyList<string>? FailedIds = null, IReadOnlyList<string>? CueIds = null)
+{
+    public StageWorkProgress? WorkProgress { get; init; }
+}
 
 public sealed class ProjectTaskService(IDesktopJobService jobs, ProjectStore store,
     Func<string> speechKey, Func<AppSettings, string> translationKey, Func<AppSettings, string>? credentialHint = null,
@@ -30,8 +33,13 @@ public sealed class ProjectTaskService(IDesktopJobService jobs, ProjectStore sto
             _ => AtomicFile.Hash(new { Model = ModelProfile.ExecutionParameters(settings), Pipeline = pipeline.TranslationIdentity, settings.SourceLanguage, settings.TargetLanguage, settings.TargetStyle })
         };
     }
-    public static bool ConfigurationChanged(StageRecord stage, TaskStage kind, AppSettings settings) => stage.Settings is { } snapshot &&
-        ConfigurationIdentity(kind, ConfigurationStore.ReadSnapshot(snapshot)!) != ConfigurationIdentity(kind, settings);
+    public static bool ConfigurationChanged(StageRecord stage, TaskStage kind, AppSettings settings)
+    {
+        if (stage.Settings is not { } snapshot) return false;
+        var current = ConfigurationStore.Snapshot(settings);
+        if (kind == TaskStage.Subtitles) current.UseSourceTextSegmentation();
+        return ConfigurationIdentity(kind, ConfigurationStore.ReadSnapshot(snapshot)!) != ConfigurationIdentity(kind, current);
+    }
 
     public async Task RunAllAsync(ProjectDocument project, MediaTaskDocument task, AppSettings settings,
         IProgress<ProjectTaskProgress> progress, CancellationToken token)
@@ -116,7 +124,7 @@ public sealed class ProjectTaskService(IDesktopJobService jobs, ProjectStore sto
                 foreach (var cue in value.Cues ?? []) if (cue.TranslatedText is not null) stage.UnitStates[cue.Id] = ProcessingState.Completed;
                 foreach (var id in value.FailedIds ?? []) stage.UnitStates[id] = ProcessingState.Failed;
             }
-            progress.Report(new(kind, value.Stage, value.Cues, value.FailedIds, value.CueIds));
+            progress.Report(new(kind, value.Stage, value.Cues, value.FailedIds, value.CueIds) { WorkProgress = value.WorkProgress });
         }
         try
         {
@@ -133,7 +141,7 @@ public sealed class ProjectTaskService(IDesktopJobService jobs, ProjectStore sto
                 case TaskStage.Chunking:
                     stage.WorkPlanKnown = true; stage.UnitStates["chunking"] = ProcessingState.Running;
                     var chunks = await jobs.PrepareChunksAsync(task.InputPath, settings, directory, !stage.ReuseSharedCache,
-                        new InlineProgress<TranscriptionProgress>(v => progress.Report(new(kind, v.Stage))), token);
+                        new InlineProgress<TranscriptionProgress>(v => progress.Report(new(kind, v.Stage) { WorkProgress = v.WorkProgress })), token);
                     await AtomicFile.WriteJsonAsync(resultFile, chunks, CancellationToken.None);
                     stage.OutputIdentity = chunks.Identity; task.SourceSha256 = chunks.SourceSha256; task.Duration = chunks.Duration;
                     stage.UnitStates["chunking"] = ProcessingState.Completed;
@@ -142,12 +150,22 @@ public sealed class ProjectTaskService(IDesktopJobService jobs, ProjectStore sto
                     var prepared = await store.ReadResultAsync<ChunkingResult>(project.Id, task.Id, stage.InputResultPath, token) ?? throw new InvalidDataException("分片结果缺失。");
                     stage.WorkPlanKnown = true;
                     foreach (var file in prepared.Files) stage.UnitStates.TryAdd(file.Chunk.Index.ToString(), ProcessingState.NotStarted);
+                    void ReportAsr(string message)
+                    {
+                        lock (gate)
+                        {
+                            var states = prepared.Files.Select(f => stage.UnitStates.GetValueOrDefault(f.Chunk.Index.ToString())).ToArray();
+                            progress.Report(new(kind, message) { WorkProgress = new(states.Count(s => s == ProcessingState.Completed), states.Length,
+                                states.Count(s => s == ProcessingState.Running), states.Count(s => s == ProcessingState.Failed)) });
+                        }
+                    }
+                    ReportAsr("Transcribing");
                     var source = await jobs.RecognizeChunksAsync(prepared, settings, speechKey(), directory, stage.ReuseSharedCache,
                         mode == ProcessingMode.RetryFailed ? originalFailures.Select(int.Parse).ToHashSet() : null,
                         new InlineProgress<TranscriptionProgress>(v =>
                         {
                             if (v.ChunkIndex is { } index && v.State is { } state) lock (gate) stage.UnitStates[index.ToString()] = state;
-                            progress.Report(new(kind, v.Stage));
+                            ReportAsr(v.Stage);
                         }), token);
                     source = source with { Cues = [] };
                     await AtomicFile.WriteJsonAsync(resultFile, source, CancellationToken.None);
@@ -188,7 +206,7 @@ public sealed class ProjectTaskService(IDesktopJobService jobs, ProjectStore sto
                     stage.State = translated.IsComplete ? ProcessingState.Completed : ProcessingState.PartialFailure;
                     foreach (var cue in translated.Cues) stage.UnitStates[cue.Id] = translated.FailedIds.Contains(cue.Id) ? ProcessingState.Failed : ProcessingState.Completed;
                     if (!translated.IsComplete) stage.Error = $"{translated.FailedIds.Count} 条字幕翻译失败。";
-                    progress.Report(new(kind, "Completed", translated.Cues, translated.FailedIds));
+                    progress.Report(new(kind, translated.IsComplete ? "Completed" : "PartialFailure", translated.Cues, translated.FailedIds));
                     break;
             }
             if (kind != TaskStage.Translation) { stage.State = ProcessingState.Completed; stage.WorkPlanKnown = true; stage.FailedUnits.Clear(); stage.UnitErrors.Clear(); }

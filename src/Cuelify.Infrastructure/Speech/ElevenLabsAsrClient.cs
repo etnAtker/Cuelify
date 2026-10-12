@@ -1,5 +1,6 @@
 using System.Net.Http.Headers;
 using Cuelify.Core.Speech;
+using Cuelify.Infrastructure.Storage;
 
 namespace Cuelify.Infrastructure.Speech;
 
@@ -17,7 +18,9 @@ public sealed class ElevenLabsAsrClient : IAsrClient
         _options.Validate();
     }
 
-    public async Task<AsrTranscript> TranscribeAsync(string audioFilePath, CancellationToken cancellationToken)
+    public Task<AsrTranscript> TranscribeAsync(string audioFilePath, CancellationToken cancellationToken) => TranscribeAsync(audioFilePath, cancellationToken, null);
+
+    public async Task<AsrTranscript> TranscribeAsync(string audioFilePath, CancellationToken cancellationToken, IProgress<string>? progress)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var key = _apiKeyProvider();
@@ -29,7 +32,13 @@ public sealed class ElevenLabsAsrClient : IAsrClient
         using var request = new HttpRequestMessage(HttpMethod.Post, "https://api.elevenlabs.io/v1/speech-to-text");
         request.Headers.Add("xi-api-key", key);
         using var multipart = new MultipartFormDataContent();
-        using var audioContent = new StreamContent(file);
+        progress?.Report("AsrUploading");
+        var uploaded = false;
+        using var tracked = new ProgressStream(file, bytes =>
+        {
+            if (!uploaded && bytes >= file.Length) { uploaded = true; progress?.Report("AsrWaiting"); }
+        });
+        using var audioContent = new StreamContent(tracked);
         audioContent.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
         multipart.Add(audioContent, "file", Path.GetFileName(audioFilePath));
         multipart.Add(new StringContent(_options.ModelId), "model_id");
@@ -51,6 +60,7 @@ public sealed class ElevenLabsAsrClient : IAsrClient
             throw new AsrServiceException(response.StatusCode, retryAfter);
         }
         var json = await response.Content.ReadAsStringAsync(timeout.Token);
+        progress?.Report("AsrValidating");
         return ElevenLabsTranscriptParser.Parse(json);
     }
 }

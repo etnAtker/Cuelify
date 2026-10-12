@@ -261,6 +261,7 @@ public partial class MainWindowViewModel
             OpenPrompt(SubtitlePipelinePresets.TwoStage); Error = ""; SettingsStatus = "未保存的管线已删除"; return;
         }
         IsSavingSettings = true;
+        using var feedback = BeginFeedback("正在删除字幕管线…");
         try
         {
             var snapshot = Services.ConfigurationStore.Snapshot(Settings);

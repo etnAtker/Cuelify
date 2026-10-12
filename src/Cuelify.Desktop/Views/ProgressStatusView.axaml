@@ -1,0 +1,8 @@
+<UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:vm="using:Cuelify.Desktop.ViewModels" x:Class="Cuelify.Desktop.Views.ProgressStatusView" x:DataType="vm:OperationProgressViewModel">
+  <StackPanel Spacing="4" IsVisible="{Binding IsVisible}" Margin="0,8">
+    <Grid ColumnDefinitions="*,Auto"><TextBlock Text="{Binding Message}" TextWrapping="Wrap" Margin="0,0,12,0" AutomationProperties.LiveSetting="Polite" /><TextBlock Grid.Column="1" Text="{Binding Elapsed}" Classes="muted" /></Grid>
+    <TextBlock Text="{Binding CountText}" IsVisible="{Binding HasCount}" TextWrapping="Wrap" Classes="muted" />
+    <TextBlock Text="{Binding ExtraText}" IsVisible="{Binding HasExtra}" TextWrapping="Wrap" Classes="muted" />
+    <ProgressBar Classes="operation-progress" Maximum="100" Value="{Binding BarValue}" IsIndeterminate="{Binding IsIndeterminate}" AutomationProperties.Name="处理进度" />
+  </StackPanel>
+</UserControl>

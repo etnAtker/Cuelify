@@ -79,7 +79,12 @@ public sealed class DesktopJobService(string? root = null) : IDesktopJobService
         bool reuseShared, IReadOnlySet<string>? retryBlocks, IProgress<TranslationProgress> progress, CancellationToken token) => Task.Run(async () =>
     {
         if (settings.GetPipeline().Method == SegmentationMethod.Program)
-            return ProgramSegmentation.Build(source.Words, source.Duration, settings.GetPipeline(), TimeSpan.FromMilliseconds(settings.ZeroDurationToleranceMs));
+        {
+            progress.Report(new("BuildingCues", []));
+            var result = ProgramSegmentation.Build(source.Words, source.Duration, settings.GetPipeline(), TimeSpan.FromMilliseconds(settings.ZeroDurationToleranceMs));
+            progress.Report(new("CuesReady", []) { Cues = result.Cues, WorkProgress = new(source.Words.Count, source.Words.Count) { Unit = "词" } });
+            return result;
+        }
         var engine = await EngineAsync(settings, key, token);
         var generated = await new SubtitlePipelineOrchestrator(engine, directory, reuseShared ? Path.Combine(_root, "Pipelines") : null)
             .GenerateAsync(source.Words, source.Cues, source.Duration, settings.GetPipeline(), settings.SegmentationSettings(), progress, token, retryBlocks);

@@ -122,6 +122,7 @@ public partial class MainWindowViewModel
     }
     internal async Task SaveStepModelAsync(ProjectDocument project, MediaTaskItem media, TaskStage kind, ModelChoice choice)
     {
+        using var feedback = BeginFeedback("正在保存步骤模型…");
         if (!CanManageProject || kind is not (TaskStage.Subtitles or TaskStage.Translation)) return;
         using var projectLock = _projects.AcquireProject(project.Id);
         var settings = MediaSettings(media); var profile = ModelProfile.Capture(choice.Settings);
@@ -133,6 +134,7 @@ public partial class MainWindowViewModel
     }
     internal async Task SetWorkspaceCurrentAsync(string projectId, MediaTaskDocument task, TaskStage kind, StageRecord record)
     {
+        using var feedback = BeginFeedback("正在切换当前版本…");
         if (!CanManageProject) return;
         using var projectLock = _projects.AcquireProject(projectId);
         await _projects.SetCurrentAsync(projectId, task, kind, record);
@@ -142,6 +144,7 @@ public partial class MainWindowViewModel
     }
     internal async Task SaveWorkspaceProjectNameAsync(ProjectDocument? project, string name, bool create)
     {
+        using var feedback = BeginFeedback("正在保存项目…");
         if (string.IsNullOrWhiteSpace(name)) throw new ArgumentException("请填写项目名称。");
         if (create)
         { ProjectName = name.Trim(); await CreateProjectAsync(); Page = AppPage.Workspace; }
@@ -154,6 +157,7 @@ public partial class MainWindowViewModel
     }
     internal async Task SaveMediaSettingsAsync(ProjectDocument project, MediaTaskItem media, AppSettings settings)
     {
+        using var feedback = BeginFeedback("正在保存媒体设置…");
         if (!CanManageProject) return;
         if (string.IsNullOrWhiteSpace(settings.TargetLanguage)) throw new ArgumentException("请填写目标语言。");
         _ = settings.GetPipeline(); ConfigurationStore.ValidateSecrets(settings, Secrets);
@@ -275,7 +279,9 @@ public partial class MainWindowViewModel
                 var item = items.FirstOrDefault(i => i.Document.Id == entry.MediaId);
                 if (item is null) { entry.State = ProcessingState.Failed; continue; }
                 _mediaOperationTarget = item; entry.State = ProcessingState.Running;
+                Workspace.ResetProgress();
                 Workspace.ActiveText = $"{item.Name} · {plan.Items.IndexOf(entry) + 1}/{plan.Items.Count}";
+                Activity.Update(Workspace.ActiveText, reset: true); UpdateBatchActivity();
                 await _projects.SaveAsync(project, token);
                 try
                 {
@@ -292,7 +298,7 @@ public partial class MainWindowViewModel
                 catch (ServiceCredentialException) { entry.State = ProcessingState.Failed; throw; }
                 catch (OperationCanceledException) when (token.IsCancellationRequested) { entry.State = ProcessingState.Cancelled; throw; }
                 catch (Exception e) { entry.State = ProcessingState.Failed; AddLog($"{item.Name}：{UserErrorMessages.FromException(e)}"); }
-                finally { await _projects.SaveAsync(project, CancellationToken.None); item.Refresh(); }
+                finally { await _projects.SaveAsync(project, CancellationToken.None); item.Refresh(); UpdateBatchActivity(); }
             }
             plan.State = plan.Items.All(i => i.State == ProcessingState.Completed || i.SkipReason.Length > 0) ? ProcessingState.Completed : ProcessingState.PartialFailure;
         }
@@ -317,6 +323,7 @@ public partial class MainWindowViewModel
             if (path is null) return;
             if (!Path.GetExtension(path).Equals(".srt", StringComparison.OrdinalIgnoreCase) || Path.GetFullPath(path).Equals(Path.GetFullPath(task.InputPath), StringComparison.OrdinalIgnoreCase)) throw new ArgumentException("请选择 SRT 输出路径，不能覆盖原媒体。");
             if (File.Exists(path) && !await _dialogs.ConfirmAsync("目标 SRT 已存在，确认覆盖？")) return;
+            using var feedback = BeginFeedback("正在导出 SRT 字幕…");
             await AtomicFile.WriteTextAsync(path, SrtSerializer.SerializeTranslated(cues), true, CancellationToken.None);
             AddLog("SRT 已导出：" + path);
         }
@@ -324,6 +331,7 @@ public partial class MainWindowViewModel
     }
     internal async Task RemoveSelectedMediaAsync()
     {
+        using var feedback = BeginFeedback("正在移出媒体…");
         if (!CanManageProject || SelectedProject is null || SelectedMedia is null) return;
         var project = SelectedProject; var item = SelectedMedia;
         using var projectLock = _projects.AcquireProject(project.Id);
@@ -333,6 +341,7 @@ public partial class MainWindowViewModel
     }
     internal async Task UndoRemoveAsync()
     {
+        using var feedback = BeginFeedback("正在恢复媒体…");
         if (!CanManageProject || SelectedProject is null || SelectedProject.RemovedMediaIds.Count == 0) return;
         var project = SelectedProject;
         using var projectLock = _projects.AcquireProject(project.Id);
@@ -349,15 +358,21 @@ public partial class MainWindowViewModel
         {
             var path = await _dialogs.OpenAsync("重新定位媒体", ["*.mp4", "*.mkv", "*.mov", "*.mp3", "*.wav", "*.flac", "*.m4a", "*.aac", "*.ogg", "*.webm"]);
             if (path is null) return;
-            var hash = await AtomicFile.HashFileAsync(path, CancellationToken.None);
+            await ExecuteAsync(async token =>
+            {
+            Activity.Update("正在校验重新定位的文件…", reset: true);
+            var hash = await AtomicFile.HashFileAsync(path, token, new Progress<StageWorkProgress>(value => Post(token,
+                () => { if (Activity.Message == "正在校验重新定位的文件…") Activity.Update("正在校验重新定位的文件…", value); })));
             var changed = media.Document.SourceSha256 is null || hash != media.Document.SourceSha256;
-            if (changed && !await _dialogs.ConfirmAsync("文件内容无法确认与原文件一致。重新定位后需要更新分片、识别和字幕，旧结果保留。")) return;
-            var info = await _jobs.ProbeAsync(path, MediaSettings(media), CancellationToken.None);
+            if (changed && !await _dialogs.ConfirmAsync("文件内容无法确认与原文件一致。重新定位后需要更新分片、识别和字幕，旧结果保留。", token)) return;
+            Activity.Update("正在读取媒体信息…", reset: true);
+            var info = await _jobs.ProbeAsync(path, MediaSettings(media), token);
             using var projectLock = _projects.AcquireProject(project.Id);
             media.Document.InputPath = Path.GetFullPath(path); media.Document.SourceSha256 = hash; media.Document.Duration = info.Duration;
             if (changed) media.Document.Chunking.NeedsUpdate = true;
             ProjectTaskService.RefreshValidity(media.Document); await _projects.SaveTaskAsync(project.Id, media.Document);
             await RestoreSelectedTaskAsync(media); RefreshProjectState();
+            }, probing: true);
         }
         catch (Exception e) { ReportError(e); }
     }

@@ -47,9 +47,15 @@ public static class AtomicFile
     }
 
     public static string Hash<T>(T value) => Convert.ToHexStringLower(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(value)));
-    public static async Task<string> HashFileAsync(string path, CancellationToken cancellationToken)
+    public static async Task<string> HashFileAsync(string path, CancellationToken cancellationToken, IProgress<Cuelify.Core.Projects.StageWorkProgress>? progress = null)
     {
         await using var file = File.OpenRead(path);
-        return Convert.ToHexStringLower(await SHA256.HashDataAsync(file, cancellationToken));
+        if (progress is null) return Convert.ToHexStringLower(await SHA256.HashDataAsync(file, cancellationToken));
+        void Report(long bytes) => progress.Report(new(bytes, file.Length) { Unit = "字节" });
+        Report(0);
+        using var tracked = new ProgressStream(file, Report);
+        var hash = await SHA256.HashDataAsync(tracked, cancellationToken);
+        tracked.ReportCompleted();
+        return Convert.ToHexStringLower(hash);
     }
 }

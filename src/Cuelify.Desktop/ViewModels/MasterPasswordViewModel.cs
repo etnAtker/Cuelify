@@ -20,6 +20,7 @@ public partial class MasterPasswordViewModel(PasswordPurpose purpose, Func<strin
     public string PasswordLabel => IsChange ? "新主密码" : "主密码";
     public bool NeedsConfirmation => purpose != PasswordPurpose.Unlock;
     public bool CanEdit => !IsBusy;
+    public OperationProgressViewModel Progress { get; } = new();
     public char PasswordChar => ShowPassword ? '\0' : '●';
     public event Action? Completed;
     public event Action? Cancelled;
@@ -34,6 +35,7 @@ public partial class MasterPasswordViewModel(PasswordPurpose purpose, Func<strin
         if (NeedsConfirmation && Password != Confirmation) { Error = "两次输入的主密码不一致。"; return; }
         if (IsChange && string.IsNullOrEmpty(CurrentPassword)) { Error = "请输入当前主密码。"; return; }
         IsBusy = true;
+        using var feedback = Progress.Begin(purpose switch { PasswordPurpose.Create => "正在设置主密码…", PasswordPurpose.Change => "正在更换主密码…", _ => "正在解锁密钥…" });
         try { await submit(IsChange ? CurrentPassword : Password, Password); IsBusy = false; Completed?.Invoke(); }
         catch (OperationCanceledException) { IsBusy = false; Cancelled?.Invoke(); }
         catch (Exception exception) { Error = CredentialErrorMessages.FromException(exception); }

@@ -19,7 +19,10 @@ public sealed record TranscriptionOptions
     public TimeSpan MaximumRetryDelay { get; init; } = TimeSpan.FromSeconds(60);
 }
 
-public sealed record TranscriptionProgress(string Stage, int? ChunkIndex = null, int? TotalChunks = null, ProcessingState? State = null);
+public sealed record TranscriptionProgress(string Stage, int? ChunkIndex = null, int? TotalChunks = null, ProcessingState? State = null)
+{
+    public StageWorkProgress? WorkProgress { get; init; }
+}
 public sealed record TranscriptionResult(string JobId, TimeSpan Duration, IReadOnlyList<AudioChunk> Chunks,
     IReadOnlyList<WordToken> Words, IReadOnlyList<SubtitleCue> Cues, int AsrRequests, int CacheHits, string OutputPath);
 public sealed class TranscriptionFailedException(IReadOnlyList<int> failedChunks) : Exception(
@@ -116,7 +119,8 @@ public sealed class TranscriptionPipeline(IAudioProcessor audioProcessor, IVoice
                         try
                         {
                             Interlocked.Increment(ref requests);
-                            var transcript = await asr.TranscribeAsync(file.Path, cancellationToken);
+                            var transcript = await asr.TranscribeAsync(file.Path, cancellationToken,
+                                new InlineProgress<string>(stage => progress?.Report(new(stage, chunk.Index, chunks.Length))));
                             _ = WordTimelineMerger.ToGlobal(new(chunk, transcript));
                             // 已收齐且通过校验的付费结果，即使此时用户取消，也先原子保存。
                             await AtomicFile.WriteJsonAsync(path, transcript, CancellationToken.None);

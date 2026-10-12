@@ -179,6 +179,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     private void SettingsChanged(object? sender, PropertyChangedEventArgs args)
     {
         RefreshInferenceSettings(args.PropertyName);
+        if (args.PropertyName == nameof(AppSettings.ReduceMotion)) Activity.ReduceMotion = Settings.ReduceMotion;
         ModelSettingsChanged(args);
         LlamaSettingsChanged(args.PropertyName);
         if (args.PropertyName == nameof(AppSettings.SourceLanguage) || _loadingSettings) OnPropertyChanged(nameof(DefaultSourceLanguage));
@@ -202,8 +203,8 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     }
     partial void OnInputPathChanged(string value)
     { OnPropertyChanged(nameof(FileName)); if (_restoringTask) return; _settingMedia = true; SelectedMedia = null; _settingMedia = false; _taskOptionBase = null; CueSelection.Clear(); Rows.Clear(); _isComplete = false; _hasFinalCues = false; _jobSettings = null; _jobSource = null; CanContinue = false; Step = WorkflowStep.File; Error = ""; Status = "待开始"; MediaSummary = ""; OnPropertyChanged(nameof(FileName)); OnPropertyChanged(nameof(ResultSummary)); OnPropertyChanged(nameof(HasRows)); RefreshCommands(); }
-    partial void OnIsBusyChanged(bool value) { RefreshCommands(); OnPropertyChanged(nameof(IsProcessing)); OnPropertyChanged(nameof(SettingsHint)); Workspace?.Refresh(); }
-    partial void OnIsInitializingChanged(bool value) => RefreshCommands();
+    partial void OnIsBusyChanged(bool value) { RefreshCommands(); OnPropertyChanged(nameof(IsProcessing)); OnPropertyChanged(nameof(ShowActivitySettings)); OnPropertyChanged(nameof(SettingsHint)); Workspace?.Refresh(); }
+    partial void OnIsInitializingChanged(bool value) { RefreshCommands(); OnPropertyChanged(nameof(ShowProjectEmptyState)); }
     partial void OnIsSavingSettingsChanged(bool value) { RefreshCommands(); if (!value) ResumePendingWorkspaceAction(); }
     partial void OnErrorChanged(string value)
     {
@@ -280,6 +281,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     private Task InitializeAsync() => _initialization ??= LoadSettingsAsync();
     private async Task LoadSettingsAsync()
     {
+        using var feedback = BeginFeedback("正在加载设置和项目…");
         IsInitializing = true;
         try
         {
@@ -322,6 +324,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     {
         if (!CanConfigure) return;
         IsSavingSettings = true;
+        using var feedback = BeginFeedback("正在保存设置…");
         try
         {
             var snapshot = ConfigurationStore.Snapshot(Settings);
@@ -382,7 +385,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         if (value.CueIds.Count > 0) AddLog($"{Status}：{string.Join(", ", value.CueIds)}");
     }
     [RelayCommand]
-    private void Cancel() { if (IsBusy) { if (_isMediaJob && (_mediaOperationTarget is null || SelectedMedia == _mediaOperationTarget)) Status = "正在取消…"; if (IsPreparing) { PreparationStatus = "正在取消…"; if (_preparationEngineTest) EngineStatus = "正在取消…"; } _cancellation?.Cancel(); } }
+    private void Cancel() { if (IsBusy) { Activity.Cancel(); if (_isMediaJob) Workspace.ActiveText = "正在取消…"; if (_isMediaJob && (_mediaOperationTarget is null || SelectedMedia == _mediaOperationTarget)) Status = "正在取消…"; if (IsPreparing) { PreparationStatus = "正在取消…"; if (_preparationEngineTest) EngineStatus = "正在取消…"; } _cancellation?.Cancel(); } }
     [RelayCommand(CanExecute = nameof(CanTestEngine))]
     private Task TestEngineAsync() => ExecuteAsync(async token =>
     {
@@ -400,6 +403,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     [RelayCommand(CanExecute = nameof(CanPreview))]
     private Task PreviewRequestAsync() => ExecuteAsync(async token =>
     {
+        Activity.Update("正在生成请求预览…", reset: true);
         Preview = await _jobs.PreviewAsync(Rows.Select(row => row.Cue).ToArray(), _jobSettings!, token);
     }, probing: true);
     [RelayCommand(CanExecute = nameof(CanExport))]
@@ -414,6 +418,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
             if (Path.GetFullPath(file).Equals(Path.GetFullPath(_jobInputPath), StringComparison.OrdinalIgnoreCase)) throw new ArgumentException("请选择其他保存路径，以免覆盖原媒体文件。");
             if (File.Exists(file) && !await _dialogs.ConfirmAsync("目标 SRT 已存在，确认覆盖？")) return;
             if (!CanExport) throw new ArgumentException("翻译设置或译文已更改，请重新完成翻译后导出。");
+            using var feedback = BeginFeedback("正在导出 SRT 字幕…");
             await AtomicFile.WriteTextAsync(file, SrtSerializer.SerializeTranslated(Rows.Select(row => row.Cue).ToArray()), true, CancellationToken.None);
             AddLog("SRT 已导出：" + file);
         }
@@ -422,6 +427,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     private Task ExecuteAsync(Func<CancellationToken, Task> action, bool mediaJob = false, bool probing = false)
     {
         if (IsBusy || IsCredentialBusy || _disposed) return Task.CompletedTask;
+        if (mediaJob) Workspace.ResetProgress();
         _isMediaJob = mediaJob; IsBusy = true; Error = ""; _cancellation = new();
         if (mediaJob) { _hasStartedProcessing = false; _mediaOperationTarget = SelectedMedia; _operationProject = SelectedProject; }
         _operation = RunGuardedAsync(action, _cancellation.Token, mediaJob, probing);
@@ -429,6 +435,8 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     }
     private async Task RunGuardedAsync(Func<CancellationToken, Task> action, CancellationToken token, bool mediaJob, bool probing)
     {
+        Activity.ReduceMotion = Settings.ReduceMotion;
+        using var feedback = Activity.Begin(mediaJob ? "正在开始处理…" : "正在处理…", cancellable: true, immediate: true);
         Action? configureAfter = null;
         try { await action(token); }
         catch (OperationCanceledException) when (token.IsCancellationRequested)
@@ -490,10 +498,11 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     { foreach (var key in Secrets.Where(key => !string.IsNullOrWhiteSpace(key))) value = value.Replace(key, "[凭据已隐藏]", StringComparison.Ordinal); return value; }
     private void Post(CancellationToken token, Action action) => Dispatcher.UIThread.Post(() => { if (IsBusy && _cancellation?.Token == token && !token.IsCancellationRequested) action(); });
     private static string Stage(string stage) => stage switch
-    { "AudioPreparing" => "准备音频", "VadAnalyzing" => "分析语音", "ChunkPlanning" => "准备识别", "Transcribing" => "识别中", "RetryWaiting" => "等待重试", "BuildingCues" => "整理字幕", "Segmenting" => "语义分句中", "CuesReady" => "分句完成", "Exporting" => "保存识别结果", "Translating" => "翻译中", "TargetedRetry" => "重新翻译中", "Completed" => "处理完成", "PartialFailure" => "部分字幕未完成", "Cancelled" => "已取消", "Failed" => "处理未完成", _ => stage.StartsWith("Transcribing ", StringComparison.Ordinal) ? "识别中 " + stage[13..] : "处理中" };
+    { "SourceChecking" => "校验媒体文件", "AudioChecking" => "校验音频", "AudioPreparing" => "提取音频", "VadAnalyzing" => "分析语音", "ChunkPlanning" => "导出分片", "AsrUploading" => "上传识别音频", "AsrWaiting" => "等待识别结果", "AsrValidating" => "校验识别结果", "Transcribing" => "识别中", "RetryWaiting" => "等待重试", "BuildingCues" => "整理字幕", "Segmenting" => "语义分句中", "CuesReady" => "分句完成", "Exporting" => "保存识别结果", "Translating" => "翻译中", "TargetedRetry" => "重新翻译中", "Completed" => "处理完成", "PartialFailure" => "部分字幕未完成", "Cancelled" => "已取消", "Failed" => "处理未完成", _ => stage.StartsWith("Transcribing ", StringComparison.Ordinal) ? "识别中 " + stage[13..] : stage == "开始处理" ? "正在开始处理…" : "处理中" };
     public async ValueTask DisposeAsync()
     {
         if (_disposed) return;
+        using var feedback = Activity.Begin("正在停止任务并释放资源…", immediate: true);
         _disposed = true; _cancellation?.Cancel(); _credentialCancellation.Cancel();
         await _credentialSave;
         CancelPendingRun();

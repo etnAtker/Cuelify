@@ -735,6 +735,16 @@ internal sealed class FakeJobs : IDesktopJobService
     public TaskCompletionSource TranslationStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     public TaskCompletionSource ReleaseTranslation { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     public bool Block, BlockTranslation, Partial, Disposed;
+    public bool BlockGeneration;
+    public TaskCompletionSource GenerationStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public Action<IProgress<TranslationProgress>>? GenerationProgress;
+    public Action<IProgress<TranscriptionProgress>>? RecognitionProgress;
+    public Action<IProgress<TranscriptionProgress>>? ChunkingProgress;
+    public Action<IProgress<TranslationProgress>>? TranslationProgress;
+    public bool BlockChunking;
+    public TaskCompletionSource ChunkingStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public Func<string, CancellationToken, Task>? ProbeBehavior;
+    public IReadOnlyList<PreparedChunk> PreparedFiles = [];
     public bool ReportCompletedBatch;
     public bool ReportInterleavedBatch;
     public bool ReportTargetedRetry;
@@ -753,6 +763,7 @@ internal sealed class FakeJobs : IDesktopJobService
     public IReadOnlySet<string>? Forced;
     public async Task<MediaInfo> ProbeAsync(string input, AppSettings settings, CancellationToken token)
     {
+        if (ProbeBehavior is not null) await ProbeBehavior(input, token);
         ProbeStarted.TrySetResult();
         if (BlockProbe) await Task.Delay(Timeout.Infinite, token);
         if (ProbeFailure is not null) throw ProbeFailure;
@@ -775,8 +786,12 @@ internal sealed class FakeJobs : IDesktopJobService
     public string ChunkingHash = "fixture-sha";
     public Cuelify.Core.Speech.WordToken[] SourceWords = [];
     public Exception? GenerationFailure;
-    public Task<ChunkingResult> PrepareChunksAsync(string input, AppSettings settings, string directory, bool restart, IProgress<TranscriptionProgress> progress, CancellationToken token)
-    { Preparations++; return Task.FromResult(new ChunkingResult("fixture", TimeSpan.FromSeconds(5), ChunkingHash, "fixture.pcm", [])); }
+    public async Task<ChunkingResult> PrepareChunksAsync(string input, AppSettings settings, string directory, bool restart, IProgress<TranscriptionProgress> progress, CancellationToken token)
+    {
+        Preparations++; ChunkingProgress?.Invoke(progress); ChunkingStarted.TrySetResult();
+        if (BlockChunking) await Task.Delay(Timeout.Infinite, token);
+        return new ChunkingResult("fixture", TimeSpan.FromSeconds(5), ChunkingHash, "fixture.pcm", PreparedFiles);
+    }
     public Task<TranscriptionResult> RecognizeChunksAsync(ChunkingResult prepared, AppSettings settings, string key, string directory, bool reuseShared,
         IReadOnlySet<int>? retryChunks, IProgress<TranscriptionProgress> progress, CancellationToken token) => TranscribeAsync("fixture.mp4", settings, key, progress, token);
     public Task<SubtitlePipelineResult> GenerateStageAsync(TranscriptionResult source, AppSettings settings, string key, string directory, bool reuseShared,
@@ -787,6 +802,7 @@ internal sealed class FakeJobs : IDesktopJobService
     {
         RecognitionSettings = settings;
         Transcriptions++; Started.TrySetResult();
+        RecognitionProgress?.Invoke(progress);
         if (Block) await Task.Delay(Timeout.Infinite, token);
         if (Failure is not null) throw Failure;
         return new("fixture", TimeSpan.FromSeconds(5), [], SourceWords, SourceCues, 0, 0, "fixture.srt");
@@ -794,6 +810,7 @@ internal sealed class FakeJobs : IDesktopJobService
     public async Task<TranslationResult> TranslateAsync(IReadOnlyList<SubtitleCue> cues, AppSettings settings, string key, IReadOnlySet<string>? force, IProgress<TranslationProgress> progress, CancellationToken token)
     {
         LastSettings = settings; Forced = force; TranslationCredential = key;
+        TranslationProgress?.Invoke(progress);
         if (BlockTranslation)
         {
             if (ReportCompletedBatch) progress.Report(new("Translating", [cues[1].Id]) { Cues = cues.Select((cue, index) => cue with { TranslatedText = index == 0 ? "首批译文" : null }).ToArray() });
@@ -809,11 +826,13 @@ internal sealed class FakeJobs : IDesktopJobService
     }
     public int Generations;
     public AppSettings? GenerationSettings;
-    public Task<SubtitlePipelineResult> GenerateCuesAsync(TranscriptionResult source, AppSettings settings, string key, IProgress<TranslationProgress> progress, CancellationToken token)
+    public async Task<SubtitlePipelineResult> GenerateCuesAsync(TranscriptionResult source, AppSettings settings, string key, IProgress<TranslationProgress> progress, CancellationToken token)
     {
         GenerationSettings = settings; Generations++;
+        GenerationProgress?.Invoke(progress); GenerationStarted.TrySetResult();
+        if (BlockGeneration) await Task.Delay(Timeout.Infinite, token);
         if (GenerationFailure is not null) throw GenerationFailure;
-        return Task.FromResult(new SubtitlePipelineResult(SourceCues, SourceCues.Select((c, i) => new SourceWordRange(i, i)).ToArray(), 0, 0));
+        return new SubtitlePipelineResult(SourceCues, SourceCues.Select((c, i) => new SourceWordRange(i, i)).ToArray(), 0, 0);
     }
     public async Task<string> TestEngineAsync(AppSettings settings, string key, CancellationToken token, IProgress<Cuelify.Infrastructure.Translation.Local.LocalPreparationProgress>? progress = null)
     {

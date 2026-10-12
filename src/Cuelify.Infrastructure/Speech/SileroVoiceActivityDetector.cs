@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using Cuelify.Core.Speech;
+using Cuelify.Core.Projects;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 
@@ -18,9 +19,12 @@ public sealed class SileroVoiceActivityDetector : IVoiceActivityDetector
     }
 
     public Task<IReadOnlyList<SpeechRegion>> DetectAsync(Stream pcm16Khz, CancellationToken cancellationToken) =>
-        Task.Run(() => DetectCoreAsync(pcm16Khz, cancellationToken), cancellationToken);
+        DetectAsync(pcm16Khz, cancellationToken, null);
 
-    private async Task<IReadOnlyList<SpeechRegion>> DetectCoreAsync(Stream pcm16Khz, CancellationToken cancellationToken)
+    public Task<IReadOnlyList<SpeechRegion>> DetectAsync(Stream pcm16Khz, CancellationToken token, IProgress<StageWorkProgress>? progress) =>
+        Task.Run(() => DetectCoreAsync(pcm16Khz, token, progress), token);
+
+    private async Task<IReadOnlyList<SpeechRegion>> DetectCoreAsync(Stream pcm16Khz, CancellationToken cancellationToken, IProgress<StageWorkProgress>? progress)
     {
         ArgumentNullException.ThrowIfNull(pcm16Khz);
         if (!pcm16Khz.CanRead) throw new ArgumentException("PCM 流不可读。");
@@ -35,6 +39,9 @@ public sealed class SileroVoiceActivityDetector : IVoiceActivityDetector
         var input = new float[64 + SpeechRegionBuilder.WindowSamples];
         var bytes = new byte[SpeechRegionBuilder.WindowSamples * 2];
         var builder = new SpeechRegionBuilder(_options);
+        long processed = 0, reportedAt = 0;
+        var total = pcm16Khz.CanSeek ? pcm16Khz.Length - pcm16Khz.Position : 0;
+        progress?.Report(new(0, total) { Unit = "字节" });
 
         while (true)
         {
@@ -64,8 +71,12 @@ public sealed class SileroVoiceActivityDetector : IVoiceActivityDetector
             state = outputs.Single(output => output.Name == "stateN").AsTensor<float>().ToArray();
             Array.Copy(input, input.Length - 64, input, 0, 64);
             builder.Add(probability, validSamples);
+            processed += read;
+            if (Environment.TickCount64 - reportedAt >= 200)
+            { progress?.Report(new(processed, total) { Unit = "字节" }); reportedAt = Environment.TickCount64; }
         }
         cancellationToken.ThrowIfCancellationRequested();
+        progress?.Report(new(processed, total) { Unit = "字节" });
         return builder.Complete();
     }
 }

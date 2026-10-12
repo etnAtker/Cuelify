@@ -4,7 +4,10 @@ using Cuelify.Infrastructure.Storage;
 
 namespace Cuelify.Infrastructure.Translation.Local;
 
-public sealed record ModelDownloadProgress(string Stage, long Bytes = 0, long? TotalBytes = null);
+public sealed record ModelDownloadProgress(string Stage, long Bytes = 0, long? TotalBytes = null)
+{
+    public string Unit { get; init; } = "字节";
+}
 public sealed record ModelDownloadArtifact(string Repository, string Revision, string FileName, long? Size, string? Sha256)
 {
     public string Url => $"https://huggingface.co/{Repository}/resolve/{Uri.EscapeDataString(Revision)}/{string.Join('/', FileName.Split('/').Select(Uri.EscapeDataString))}";
@@ -56,7 +59,7 @@ public sealed class ModelDownloadService(HttpClient http) : IModelDownloadServic
         if (File.Exists(target))
         {
             progress.Report(new("校验已有模型"));
-            try { return new(target, await VerifyFileAsync(target, artifact, token)); }
+            try { return new(target, await VerifyFileAsync(target, artifact, token, progress, "校验已有模型")); }
             catch (InvalidDataException) { /* 新版本写入临时文件，保留当前正式模型。 */ }
         }
         var partial = target + ".partial";
@@ -64,7 +67,7 @@ public sealed class ModelDownloadService(HttpClient http) : IModelDownloadServic
         await ResumableDownload.DownloadAsync(http, partial, artifact, artifact.Url, artifact.Size, progress, token);
         progress.Report(new("校验模型"));
         string sha256;
-        try { sha256 = await VerifyFileAsync(partial, artifact, token); }
+        try { sha256 = await VerifyFileAsync(partial, artifact, token, progress, "校验模型"); }
         catch (InvalidDataException)
         {
             // 坏片段无法续传；只移除本服务持有的临时文件，不覆盖正式模型。
@@ -76,7 +79,8 @@ public sealed class ModelDownloadService(HttpClient http) : IModelDownloadServic
         return new(target, sha256);
     }
 
-    private static async Task<string> VerifyFileAsync(string path, ModelDownloadArtifact artifact, CancellationToken token)
+    private static async Task<string> VerifyFileAsync(string path, ModelDownloadArtifact artifact, CancellationToken token,
+        IProgress<ModelDownloadProgress> progress, string stage)
     {
         var info = new FileInfo(path);
         if (!info.Exists) throw new FileNotFoundException("找不到模型文件。", path);
@@ -87,7 +91,8 @@ public sealed class ModelDownloadService(HttpClient http) : IModelDownloadServic
             if (await file.ReadAsync(magic, token) != 4 || !magic.AsSpan().SequenceEqual("GGUF"u8))
                 throw new InvalidDataException("下载的模型文件无效，请重新下载。");
         }
-        var hash = await AtomicFile.HashFileAsync(path, token);
+        var hash = await AtomicFile.HashFileAsync(path, token, new InlineProgress<Cuelify.Core.Projects.StageWorkProgress>(value =>
+            progress.Report(new(stage, value.Completed, value.Total))));
         if (!string.IsNullOrWhiteSpace(artifact.Sha256) && hash != artifact.Sha256)
             throw new InvalidDataException("下载的模型文件不完整，请重新下载。");
         return hash;

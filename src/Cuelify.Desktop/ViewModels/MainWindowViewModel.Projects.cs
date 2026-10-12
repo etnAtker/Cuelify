@@ -122,6 +122,7 @@ public partial class MainWindowViewModel
     }
     private async Task OpenProjectAsync(ProjectDocument project, string? mediaId = null)
     {
+        using var feedback = BeginFeedback($"正在打开项目：{project.Name}…");
         using var projectLock = _operationProject?.Id == project.Id && IsBusy ? null : _projects.AcquireProject(project.Id);
         var items = new List<MediaTaskItem>();
         foreach (var id in project.MediaIds)
@@ -161,6 +162,7 @@ public partial class MainWindowViewModel
     }
     private async Task RestoreSelectedTaskAsync(MediaTaskItem? item)
     {
+        using var feedback = BeginFeedback("正在读取媒体结果…");
         var revision = ++_mediaNavigationRevision;
         try
         {
@@ -294,28 +296,40 @@ public partial class MainWindowViewModel
         IsImporting = true;
         try
         {
+        await ExecuteAsync(async token =>
+        {
         MediaTaskItem? first = null;
         var notices = new List<string>();
+        var completed = 0; var failed = 0;
+        Activity.Update("正在读取媒体信息…", new(0, paths.Count) { Unit = "个文件", ShowWaiting = true });
         foreach (var path in paths)
         {
+            token.ThrowIfCancellationRequested();
+            Activity.Update($"正在检查：{Path.GetFileName(path)}", new(completed, paths.Count, Running: 1, Failed: failed) { Unit = "个文件", ShowWaiting = true });
             try
             {
                 var full = Path.GetFullPath(path);
                 var duplicate = projectItems.FirstOrDefault(m => string.Equals(m.Document.InputPath, full, StringComparison.OrdinalIgnoreCase));
-                if (duplicate is not null) { first ??= duplicate; notices.Add($"{duplicate.Name} 已在项目中。"); continue; }
+                if (duplicate is not null) { first ??= duplicate; notices.Add($"{duplicate.Name} 已在项目中。"); completed++; continue; }
                 var options = SavedWorkspaceSettings; options.TaskPipelineId = null;
                 var task = new MediaTaskDocument { InputPath = full, Options = JsonSerializer.SerializeToElement(options) };
-                var info = await _jobs.ProbeAsync(full, options, CancellationToken.None);
+                var info = await _jobs.ProbeAsync(full, options, token);
                 task.Duration = info.Duration;
                 await _projects.SaveTaskAsync(project.Id, task); project.MediaIds.Add(task.Id);
                 var item = new MediaTaskItem(task); projectItems.Add(item); if (SelectedProject == project) MediaTasks.Add(item); first ??= item;
+                completed++;
+                _projectMediaCache[project.Id] = projectItems;
+                await _projects.SaveAsync(project, CancellationToken.None);
             }
-            catch (Exception e) { notices.Add($"{Path.GetFileName(path)}：{UserErrorMessages.FromException(e)}"); }
+            catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
+            catch (Exception e) { failed++; notices.Add($"{Path.GetFileName(path)}：{UserErrorMessages.FromException(e)}"); }
+            finally { Activity.Update("读取媒体信息", new(completed, paths.Count, Failed: failed) { Unit = "个文件", ShowWaiting = true }); }
         }
         _projectMediaCache[project.Id] = projectItems;
         await _projects.SaveAsync(project);
         if (first is not null && SelectedProject == project) SelectedMedia = first;
         await _navigationTask; Error = string.Join("\n", notices); await RefreshProjectListAsync(); RefreshProjectState();
+        }, probing: true);
         }
         finally { IsImporting = false; }
     }

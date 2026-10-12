@@ -1,6 +1,8 @@
 using System.Globalization;
 using System.Text.Json;
 using Cuelify.Core.Media;
+using Cuelify.Core.Projects;
+using Cuelify.Infrastructure.Storage;
 
 namespace Cuelify.Infrastructure.Media;
 
@@ -24,7 +26,10 @@ public sealed class FfmpegAudioProcessor(ICommandRunner runner, string ffmpegPat
         return new(TimeSpan.FromSeconds(seconds), audio.GetProperty("index").GetInt32());
     }
 
-    public async Task<PreparedAudio> PrepareAsync(string inputPath, MediaInfo media, string pcmPath, CancellationToken cancellationToken)
+    public Task<PreparedAudio> PrepareAsync(string inputPath, MediaInfo media, string pcmPath, CancellationToken cancellationToken) =>
+        PrepareAsync(inputPath, media, pcmPath, cancellationToken, null);
+
+    public async Task<PreparedAudio> PrepareAsync(string inputPath, MediaInfo media, string pcmPath, CancellationToken cancellationToken, IProgress<StageWorkProgress>? progress)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(pcmPath))!);
         var temporary = pcmPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
@@ -33,12 +38,16 @@ public sealed class FfmpegAudioProcessor(ICommandRunner runner, string ffmpegPat
             await using (var output = File.Create(temporary))
             {
                 var duration = Seconds(media.Duration);
+                var expectedBytes = media.Duration.Ticks / ChunkPlannerOptions.TicksPerSample * 2;
+                progress?.Report(new(0, expectedBytes) { Unit = "字节" });
+                using var tracked = new ProgressStream(output, bytes => progress?.Report(new(bytes, expectedBytes) { Unit = "字节" }));
                 // first_pts=0 补齐延迟音轨的开头，apad/atrim 保留媒体尾部时间轴。
                 var result = await runner.RunAsync(new(ffmpegPath,
                     ["-nostdin", "-hide_banner", "-loglevel", "error", "-i", inputPath, "-map", $"0:{media.AudioStreamIndex}", "-vn",
                      "-af", $"aresample=16000:async=1:first_pts=0,apad=whole_dur={duration},atrim=duration={duration}",
-                     "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", "-f", "s16le", "pipe:1"], TimeSpan.FromMinutes(30)), output, cancellationToken);
+                     "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", "-f", "s16le", "pipe:1"], TimeSpan.FromMinutes(30)), tracked, cancellationToken);
                 EnsureSuccess(result, "音频准备");
+                tracked.ReportCompleted();
                 await output.FlushAsync(cancellationToken);
             }
             var length = new FileInfo(temporary).Length;

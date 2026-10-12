@@ -8,10 +8,13 @@ public interface IVoiceActivityDetector
 {
     // 输入必须是单声道、16 kHz、有符号 16 位 little-endian PCM；保留原始时间轴。
     Task<IReadOnlyList<SpeechRegion>> DetectAsync(Stream pcm16Khz, CancellationToken cancellationToken);
+    Task<IReadOnlyList<SpeechRegion>> DetectAsync(Stream pcm16Khz, CancellationToken token,
+        IProgress<Cuelify.Core.Projects.StageWorkProgress>? progress) => DetectAsync(pcm16Khz, token);
 }
 
 public interface IAsrClient
 {
     // 返回分片局部时间；后续分片编排负责转换成全局时间。
     Task<AsrTranscript> TranscribeAsync(string audioFilePath, CancellationToken cancellationToken);
+    Task<AsrTranscript> TranscribeAsync(string audioFilePath, CancellationToken token, IProgress<string>? progress) => TranscribeAsync(audioFilePath, token);
 }

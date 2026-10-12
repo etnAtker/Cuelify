@@ -64,7 +64,8 @@ public sealed class LlamaPackageService(HttpClient http) : ILlamaPackageService
         var partial = Path.Combine(directory, "package.zip.partial");
         await ResumableDownload.DownloadAsync(http, partial, artifact, artifact.Url, artifact.Size, progress, token);
         progress.Report(new("校验 llama.cpp 运行包"));
-        if (await AtomicFile.HashFileAsync(partial, token) != artifact.Sha256)
+        if (await AtomicFile.HashFileAsync(partial, token, new InlineProgress<Cuelify.Core.Projects.StageWorkProgress>(value =>
+            progress.Report(new("校验 llama.cpp 运行包", value.Completed, value.Total)))) != artifact.Sha256)
         {
             File.Delete(partial); File.Delete(partial + ".json");
             throw new InvalidDataException("llama.cpp 运行包校验失败，请重新下载。");
@@ -75,12 +76,13 @@ public sealed class LlamaPackageService(HttpClient http) : ILlamaPackageService
         try
         {
             progress.Report(new("解压 llama.cpp 运行包"));
-            await ExtractAsync(partial, staging, token);
+            await ExtractAsync(partial, staging, token, progress);
             // 官方包中配套 DLL 和目录布局全部保留。
             var servers = Directory.GetFiles(staging, "llama-server.exe", SearchOption.AllDirectories);
             if (servers.Length != 1 || !File.Exists(Path.Combine(Path.GetDirectoryName(servers[0])!, "ggml-vulkan.dll")))
                 throw new InvalidDataException("运行包缺少 llama-server.exe 或 Vulkan 配套库，请重新下载。");
             var relative = Path.GetRelativePath(staging, servers[0]);
+            progress.Report(new("获取运行包许可"));
             using var licenseRequest = new HttpRequestMessage(HttpMethod.Get,
                 $"https://raw.githubusercontent.com/ggml-org/llama.cpp/{Uri.EscapeDataString(artifact.Version)}/LICENSE");
             using var license = await http.SendAsync(licenseRequest, token);
@@ -91,6 +93,7 @@ public sealed class LlamaPackageService(HttpClient http) : ILlamaPackageService
             token.ThrowIfCancellationRequested();
             if (Directory.Exists(target))
             {
+                progress.Report(new("检查已安装运行包"));
                 // 同一资产已安装时核对全部文件，不能原地覆盖仍被旧任务引用的运行包。
                 foreach (var file in Directory.EnumerateFiles(staging, "*", SearchOption.AllDirectories))
                 {
@@ -110,12 +113,15 @@ public sealed class LlamaPackageService(HttpClient http) : ILlamaPackageService
         }
     }
 
-    private static async Task ExtractAsync(string archivePath, string staging, CancellationToken token)
+    private static async Task ExtractAsync(string archivePath, string staging, CancellationToken token, IProgress<ModelDownloadProgress> progress)
     {
         using var archive = ZipFile.OpenRead(archivePath);
         if (archive.Entries.Count > 10_000) throw new InvalidDataException("运行包文件数量异常。");
         var prefix = staging + Path.DirectorySeparatorChar;
         long size = 0;
+        var files = archive.Entries.Count(entry => !entry.FullName.EndsWith('/') && !entry.FullName.EndsWith('\\'));
+        var completed = 0;
+        progress.Report(new("解压 llama.cpp 运行包", 0, files) { Unit = "个文件" });
         foreach (var entry in archive.Entries)
         {
             token.ThrowIfCancellationRequested();
@@ -132,6 +138,7 @@ public sealed class LlamaPackageService(HttpClient http) : ILlamaPackageService
             await using var output = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None, 131072, true);
             await input.CopyToAsync(output, token);
             if (output.Length != entry.Length) throw new InvalidDataException("运行包解压文件不完整。");
+            progress.Report(new("解压 llama.cpp 运行包", ++completed, files) { Unit = "个文件" });
         }
     }
 }

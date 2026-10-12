@@ -16,6 +16,8 @@ public interface IAudioProcessor
 {
     Task<MediaInfo> ProbeAsync(string inputPath, CancellationToken cancellationToken);
     Task<PreparedAudio> PrepareAsync(string inputPath, MediaInfo media, string pcmPath, CancellationToken cancellationToken);
+    Task<PreparedAudio> PrepareAsync(string inputPath, MediaInfo media, string pcmPath, CancellationToken token,
+        IProgress<Cuelify.Core.Projects.StageWorkProgress>? progress) => PrepareAsync(inputPath, media, pcmPath, token);
     Task ExportChunkAsync(PreparedAudio audio, AudioChunk chunk, string outputPath, CancellationToken cancellationToken);
 }
 
