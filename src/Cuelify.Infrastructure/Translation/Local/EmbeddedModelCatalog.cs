@@ -5,9 +5,12 @@ namespace Cuelify.Infrastructure.Translation.Local;
 public sealed record EmbeddedModel(string Id, string Name, string Repository, string Quantization)
 {
     public string DefaultFileName => Id + ".gguf";
-    public InferenceParameters DefaultParameters => Id == "index-translate-9b-q4km"
-        ? new() { Temperature = 0, TopP = 1, TopK = 40, RepeatPenalty = 1 }
-        : new() { Temperature = .7, TopP = .6, TopK = 20, RepeatPenalty = 1.05 };
+    public InferenceParameters DefaultParameters => Id switch
+    {
+        "index-translate-9b-q4km" => new() { Temperature = 0, TopP = 1, TopK = 40, RepeatPenalty = 1 },
+        "qwen3.5-9b-q4km" => new() { Temperature = .7, TopP = .8, TopK = 20, RepeatPenalty = 1 },
+        _ => new() { Temperature = .7, TopP = .6, TopK = 20, RepeatPenalty = 1.05 }
+    };
     public override string ToString() => Name;
 }
 
@@ -17,7 +20,8 @@ public static class EmbeddedModelCatalog
     [
         new("hy-mt2-1.8b-q6k", "Hy-MT2-1.8B · Q6_K", "tencent/Hy-MT2-1.8B-GGUF", "Q6_K"),
         new("hy-mt2-7b-q4km", "Hy-MT2-7B · Q4_K_M", "tencent/Hy-MT2-7B-GGUF", "Q4_K_M"),
-        new("index-translate-9b-q4km", "Index-Translate-9B · Q4_K_M", "IndexTeam/Index-Translate-9B-GGUF", "Q4_K_M")
+        new("index-translate-9b-q4km", "Index-Translate-9B · Q4_K_M", "IndexTeam/Index-Translate-9B-GGUF", "Q4_K_M"),
+        new("qwen3.5-9b-q4km", "Qwen3.5-9B · Q4_K_M", "unsloth/Qwen3.5-9B-GGUF", "Q4_K_M")
     ];
     public static EmbeddedModel Default => Presets[0];
     public static EmbeddedModel Get(string id) => Presets.FirstOrDefault(model => model.Id == id)

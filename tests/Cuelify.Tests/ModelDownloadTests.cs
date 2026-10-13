@@ -96,25 +96,37 @@ public sealed class ModelDownloadTests
         Assert.Equal(old, await File.ReadAllBytesAsync(path)); Assert.False(File.Exists(path + ".partial"));
     }
 
-    [Fact]
-    public async Task IndexPresetDiscoversCurrentOfficialQuantizedAsset()
+    [Theory]
+    [InlineData("index-translate-9b-q4km", "IndexTeam/Index-Translate-9B-GGUF", 0, 1, 40)]
+    [InlineData("qwen3.5-9b-q4km", "unsloth/Qwen3.5-9B-GGUF", .7, .8, 20)]
+    public async Task PresetDiscoversCurrentQuantizedAsset(string id, string repository, double temperature, double topP, int topK)
     {
         using var directory = new TestDirectory();
-        var model = EmbeddedModelCatalog.Get("index-translate-9b-q4km");
+        var model = EmbeddedModelCatalog.Get(id);
         using var handler = new Handler((request, _) =>
         {
             if (request.RequestUri!.AbsolutePath.Contains("/api/models/"))
             {
-                Assert.Contains("IndexTeam/Index-Translate-9B-GGUF", request.RequestUri.AbsolutePath);
-                return Task.FromResult(Metadata("new-official-revision", "renamed-index-Q4_K_M.gguf"));
+                Assert.Contains(repository, request.RequestUri.AbsolutePath);
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(JsonSerializer.Serialize(new { sha = "new-revision", siblings = new[]
+                    {
+                        new { rfilename = "renamed-model-Q4_K_M.gguf", size = Payload.Length, lfs = new { sha256 = Hash(Payload), size = Payload.Length } },
+                        new { rfilename = "mmproj-Q4_K_M.gguf", size = Payload.Length, lfs = new { sha256 = Hash(Payload), size = Payload.Length } },
+                        new { rfilename = "renamed-model-Q8_0.gguf", size = Payload.Length, lfs = new { sha256 = Hash(Payload), size = Payload.Length } }
+                    } }))
+                });
             }
-            Assert.Contains("/new-official-revision/renamed-index-Q4_K_M.gguf", request.RequestUri.AbsolutePath);
+            Assert.Contains("/new-revision/renamed-model-Q4_K_M.gguf", request.RequestUri.AbsolutePath);
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(Payload) });
         });
         using var http = new HttpClient(handler);
         var result = await new ModelDownloadService(http).DownloadAsync(model, directory.File("models"), new Sink(), default);
         Assert.Equal(Payload, await File.ReadAllBytesAsync(result.Path)); Assert.EndsWith(model.DefaultFileName, result.Path);
-        Assert.Equal(0, model.DefaultParameters.Temperature); Assert.DoesNotContain("Pipeline", System.Text.Json.JsonSerializer.Serialize(model));
+        Assert.Equal(temperature, model.DefaultParameters.Temperature); Assert.Equal(topP, model.DefaultParameters.TopP);
+        Assert.Equal(topK, model.DefaultParameters.TopK); Assert.Equal(1, model.DefaultParameters.RepeatPenalty);
+        Assert.DoesNotContain("Pipeline", System.Text.Json.JsonSerializer.Serialize(model));
     }
 
     [Fact]

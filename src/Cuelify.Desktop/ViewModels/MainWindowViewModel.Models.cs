@@ -105,7 +105,7 @@ public partial class MainWindowViewModel
                 {
                     ModelDownloadStatus = "操作未完成，请检查错误提示后重试。";
                     if (exception is HttpRequestException)
-                        throw new InvalidDataException("无法访问官方模型仓库，请检查网络后重试。", exception);
+                        throw new InvalidDataException("无法访问模型来源仓库，请检查网络后重试。", exception);
                     if (exception is IOException)
                         throw new InvalidDataException("无法保存模型，请检查配置文件夹的读写权限、可用空间和文件占用。", exception);
                     throw;

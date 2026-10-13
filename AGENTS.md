@@ -6,7 +6,7 @@ Agent 专用文档统一在 `docs/agents/`。先读 [Agent 文档索引](docs/ag
 
 - 面向用户的说明和文档使用中文。编码前理解职责与数据流，提交简短修改计划并取得明确授权；已授权范围内持续实施，范围变化再对齐。
 - 长期目标跨平台，当前发行和正式验收为 Windows 11 x64；凭证层使用主密码加密，不依赖系统凭据存储；.NET 10、Avalonia、CommunityToolkit.Mvvm。项目包含多个本地媒体，支持项目内顺序处理及单媒体操作；经 FFmpeg、Silero CPU VAD、ElevenLabs 和翻译，仅导出 SRT；不扩展播放器、通用队列、烧录或通用模型管理。
-- FFmpeg/ffprobe 经 ICommandRunner + Process；翻译保留兼容 API、DeepSeek 和本地模型三条路径。本地预置 Hy-MT2-1.8B Q6_K、Hy-MT2-7B Q4_K_M、Index-Translate-9B Q4_K_M。下载动态查询官方仓库，下载位置与默认路径在配置文件同级目录；应用管理的 llama.cpp llama-server 子进程 + Vulkan，禁止 CUDA、CPU-only 回退及连接外部已运行的模型服务；运行包动态查询官方 Windows x64 Vulkan 资产，支持手动指定。验收要求实际生成及非零 GPU layer offload。
+- FFmpeg/ffprobe 经 ICommandRunner + Process；翻译保留兼容 API、DeepSeek 和本地模型三条路径。本地预置 Hy-MT2-1.8B Q6_K、Hy-MT2-7B Q4_K_M、Index-Translate-9B Q4_K_M、Qwen3.5-9B Q4_K_M（Unsloth GGUF）。下载动态查询各模型来源仓库，下载位置与默认路径在配置文件同级目录；应用管理的 llama.cpp llama-server 子进程 + Vulkan，禁止 CUDA、CPU-only 回退及连接外部已运行的模型服务；运行包动态查询官方 Windows x64 Vulkan 资产，支持手动指定。验收要求实际生成及非零 GPU layer offload。
 - 字幕管线库提供程序分句后翻译、模型分句后翻译两个内置只读流程，自定义可增删改查/复制；固定分片、识别词、分句、结果四步，结果仅消费分句。模型与管线解耦，管线步骤配置默认模型，每媒体每步骤可覆盖；媒体设置保留管线与语言，模型在步骤 Tab 下选择。Core 定义统一输出契约和校验，本地适配器编译 GBNF，云端校验并有限重试，不假设 strict 生效。配置 schema 5，schema 3/4 备份后迁移，更早格式备份后重建；task schema 3 备份迁移旧联合结果，仅导入可验证连续词范围，原文件保留；不提供旧联合专用浏览入口；凭证与模型资产保留。
 - 原始 ASR 词及其时码不变，语义管线以连续词 ID 范围生成最终字幕；当前字幕版本的 cue ID、数量、顺序、时码冻结后，补译/重翻仅替换译文；独立重新生成字幕动作可以建立新分句版本。失败译文不能用原文冒充。项目与媒体阶段 JSON 原子保存于 ConfigurationStore.Root/Projects，项目列表扫描 project.json；阶段版本、失败单元和上游引用独立持久化。版本首次运行记录直接上游步骤与版本 ID；预览和设为当前分开。上游设为当前或切换管线后，下游仅匹配该上游 ID，选最新创建版本（含失败），无匹配则未开始；全部历史保留。继续/失败重试使用版本快照，重新执行建立新版本；全局配置修改不自动影响任务快照和导出。
 - API Key 不进普通 JSON、缓存身份、日志、预览或命令行参数；不在仓库记录本机凭据来源。真实调用、缓存、模拟与历史证据分别报告。

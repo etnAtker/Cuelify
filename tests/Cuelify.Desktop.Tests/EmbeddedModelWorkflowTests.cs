@@ -14,6 +14,32 @@ namespace Cuelify.Desktop.Tests;
 public sealed class EmbeddedModelWorkflowTests
 {
     [AvaloniaFact]
+    public async Task LoadingExistingSettingsAddsQwenAndReusesFileWithoutChangingStepDefaults()
+    {
+        using var fixture = new Fixture(); var downloads = new Downloads();
+        var qwen = EmbeddedModelCatalog.Get("qwen3.5-9b-q4km"); var qwenId = "local:" + qwen.Id;
+        var previous = fixture.Store.CreateDefaults(); previous.Models.Remove(qwenId);
+        var snapshot = StageSettingsSnapshot.Capture(Cuelify.Core.Projects.TaskStage.Subtitles, previous).GetRawText();
+        var previousDefaults = System.Text.Json.JsonSerializer.Serialize(previous.PipelineModelDefaults);
+        await AtomicFile.WriteJsonAsync(Path.Combine(fixture.Root, "settings.json"), previous, default);
+        var path = fixture.Store.DefaultModelPath(qwen); await File.WriteAllTextAsync(path, "GGUF已有模型");
+        await using var model = fixture.Model(downloads); await model.InitializeCommand.ExecuteAsync(null);
+        Assert.Equal(previous.LocalModelId, model.Settings.LocalModelId);
+        Assert.Equal(previousDefaults, System.Text.Json.JsonSerializer.Serialize(model.Settings.PipelineModelDefaults));
+        Assert.Equal(snapshot, StageSettingsSnapshot.Capture(Cuelify.Core.Projects.TaskStage.Subtitles, model.Settings).GetRawText());
+        Assert.Contains(qwen, model.EmbeddedModels);
+        Assert.Contains(model.PipelineModels, choice => choice.Settings.ModelKey() == qwenId);
+        Assert.Equal(path, model.Settings.Models[qwenId].Parameters[nameof(AppSettings.ModelPath)].GetString());
+        model.Settings.Provider = TranslationProvider.Local; model.SelectedEmbeddedModel = qwen;
+        Assert.Equal(path, model.Settings.ModelPath); Assert.Equal("模型文件已存在", model.ModelFileStatus);
+        await model.SaveSettingsCommand.ExecuteAsync(null);
+        var reloaded = (await fixture.Store.LoadAsync())!;
+        Assert.Equal(qwen.Id, reloaded.LocalModelId); Assert.Equal(path, reloaded.ModelPath);
+        Assert.Equal(previousDefaults, System.Text.Json.JsonSerializer.Serialize(reloaded.PipelineModelDefaults));
+        Assert.False(downloads.Started.Task.IsCompleted); Assert.Empty(model.Error);
+    }
+
+    [AvaloniaFact]
     public async Task ManualModelSelectionRecordsAnyReadableFileWithoutDownloadOrIdentityCheck()
     {
         using var fixture = new Fixture(); var downloads = new Downloads();
@@ -124,7 +150,7 @@ public sealed class EmbeddedModelWorkflowTests
         await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => { }, Avalonia.Threading.DispatcherPriority.Background);
         var view = window.FindControl<SettingsView>("SettingsPage")!;
         var selector = view.FindControl<ComboBox>("EmbeddedModelSelector")!;
-        Assert.Equal(3, selector.ItemCount); Assert.Equal(EmbeddedModelCatalog.Default, selector.SelectedItem);
+        Assert.Equal(4, selector.ItemCount); Assert.Equal(EmbeddedModelCatalog.Default, selector.SelectedItem);
         var button = view.FindControl<Button>("DownloadModelButton")!;
         Assert.True(button.IsEffectivelyVisible); Assert.True(button.IsEffectivelyEnabled); Assert.True(button.Bounds.Width > 0);
         var download = model.DownloadModelCommand.ExecuteAsync(null); await downloads.Started.Task;

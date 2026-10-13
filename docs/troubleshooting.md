@@ -51,7 +51,7 @@
 | 情况 | 处理 |
 | --- | --- |
 | llama.cpp 无法加载模型 | 查看日志中的 llama.cpp 加载错误，检查文件是否完整、运行包是否支持该模型、显存是否足够；必要时重新选择或下载模型。手动选择和启动前不校验模型身份、内容哈希或 GGUF 元数据，由 llama.cpp 判断可否加载。 |
-| 下载中断或网络失败 | 检查网络能否访问 Hugging Face，再点击「下载模型」继续。可续传片段保留；官方文件更新后会重新下载，原正式模型在校验完成前保留。 |
+| 下载中断或网络失败 | 检查网络能否访问 Hugging Face，再点击「下载模型」继续。可续传片段保留；来源文件更新后会重新下载，原正式模型在校验完成前保留。 |
 | NativeLibrary / VulkanOffload | 点击「下载 llama.cpp」，或重新选择完整 Windows x64 Vulkan 包中的 llama-server.exe；保留配套 DLL，检查显卡驱动，再测试本地翻译。 |
 | ServerMissing / ServerIncompatible | 在设置中下载当前运行包或指定兼容的 llama-server.exe，不能选择 llama-cli.exe。保存后测试本地翻译。 |
 | 运行包下载失败 | 检查 GitHub 访问、设置目录写权限和可用空间，再点击「下载 llama.cpp」继续。取消保留片段；校验失败或解压失败不覆盖旧版本。 |

@@ -149,22 +149,27 @@ public sealed class LocalServerTests
         Assert.Equal("你好。", completion.Content); Assert.Equal("eos", completion.StopType);
     }
 
-    [Fact]
-    public async Task StageSamplingGrammarAndTokenBudgetReachLocalCompletion()
+    [Theory]
+    [InlineData("index-translate-9b-q4km", false)]
+    [InlineData("qwen3.5-9b-q4km", true)]
+    [InlineData("qwen3.5-9b-q4km", false)]
+    public async Task StageSamplingGrammarAndTokenBudgetReachLocalCompletion(string modelId, bool useModelDefaults)
     {
-        var stage = Request() with { Parameters = new() { Temperature = 0, TopP = 1, TopK = 40, RepeatPenalty = 1, MaximumTokens = 200 }, OutputContract = new() { Kind = GenerationOutputKind.Translation, CueIds = ["a"], Format = TranslationOutputFormat.CueIdJson, MaximumTextCharacters = 44 } };
+        var defaults = EmbeddedModelCatalog.Get(modelId).DefaultParameters;
+        var sampling = useModelDefaults ? new() { MaximumTokens = 200 } : new InferenceParameters { Temperature = 0, TopP = 1, TopK = 40, RepeatPenalty = 1, MaximumTokens = 200 };
+        var stage = Request() with { Parameters = sampling, OutputContract = new() { Kind = GenerationOutputKind.Translation, CueIds = ["a"], Format = TranslationOutputFormat.CueIdJson, MaximumTextCharacters = 44 } };
         using var http = new HttpClient(new Handler(async request =>
         {
             using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
-            Assert.Equal(0, body.RootElement.GetProperty("temperature").GetDouble());
-            Assert.Equal(1, body.RootElement.GetProperty("top_p").GetDouble());
-            Assert.Equal(40, body.RootElement.GetProperty("top_k").GetInt32());
-            Assert.Equal(1, body.RootElement.GetProperty("repeat_penalty").GetDouble());
+            Assert.Equal(sampling.Temperature ?? defaults.Temperature, body.RootElement.GetProperty("temperature").GetDouble());
+            Assert.Equal(sampling.TopP ?? defaults.TopP, body.RootElement.GetProperty("top_p").GetDouble());
+            Assert.Equal(sampling.TopK ?? defaults.TopK, body.RootElement.GetProperty("top_k").GetInt32());
+            Assert.Equal(sampling.RepeatPenalty ?? defaults.RepeatPenalty, body.RootElement.GetProperty("repeat_penalty").GetDouble());
             Assert.Equal(200, body.RootElement.GetProperty("n_predict").GetInt32());
             Assert.Equal(OutputGrammarCompiler.Compile(stage.OutputContract!), body.RootElement.GetProperty("grammar").GetString());
             return new(HttpStatusCode.OK) { Content = new StringContent("data: {\"content\":\"{}\",\"stop\":true,\"stop_type\":\"eos\",\"tokens_predicted\":1,\"truncated\":false}\n\n", Encoding.UTF8, "text/event-stream") };
         })) { BaseAddress = new("http://127.0.0.1/") };
-        var protocol = new LlamaServerProtocol(http, 512, 100);
+        var protocol = new LlamaServerProtocol(http, 512, 100, defaults);
         Assert.Equal("{}", (await protocol.CompleteAsync("prepared", null, default, stage)).Content);
         using var preparedHttp = new HttpClient(new Handler(request => Task.FromResult(request.RequestUri!.AbsolutePath == "/apply-template"
             ? Json(new { prompt = "prepared" }) : Json(new { tokens = new[] { 1, 2, 3 } })))) { BaseAddress = new("http://127.0.0.1/") };

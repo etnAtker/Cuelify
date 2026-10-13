@@ -55,7 +55,7 @@ pwsh -File scripts/Verify-Release.ps1
 1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3
 ```
 
-GGUF 不纳入版本控制，预置模型与官方来源见 [README](../README.md#本地模型)。应用下载与默认路径直接位于配置文件同级目录，使用稳定模型 ID 作为本地文件名；用户也可选择其他目录下的官方模型。`ModelDownloadService` 动态查询官方仓库当前量化文件、修订、大小和可用哈希，远端文件名及哈希不固化在代码中。一次下载使用本次查询的修订保持内容一致；下次操作重新查询，不将旧修订作为全局固定版本。
+GGUF 不纳入版本控制，预置模型与下载来源见 [README](../README.md#本地模型)。应用下载与默认路径直接位于配置文件同级目录，使用稳定模型 ID 作为本地文件名；用户也可选择其他目录下的模型。`ModelDownloadService` 动态查询各模型来源仓库当前量化文件、修订、大小和可用哈希，远端文件名及哈希不固化在代码中。一次下载使用本次查询的修订保持内容一致；下次操作重新查询，不将旧修订作为全局固定版本。
 
 ## llama.cpp 运行包与本地验收
 
@@ -63,10 +63,10 @@ GGUF 不纳入版本控制，预置模型与官方来源见 [README](../README.m
 
 `llama-server` 以 Vulkan 设备、固定 slot 数和总上下文预算启动，显式禁用自动容量调整及共享 KV 池，并核对 `/props` 的每 slot 容量。日志级别 4 保留原生模型加载信息，不使用包含提示词正文的 debug/verbose。单条预算、模板、生成和 EOS 走服务端 API，流式连接关闭传递取消；Windows Job Object 保证应用异常退出时回收子进程。
 
-普通测试跳过真实 GPU 用例。显式准备官方模型后，在 Windows x64 上执行下面的可维护测试；它会通过生产下载服务准备运行包，生成新的短句、取消一次生成并验证后续请求和进程释放。`CUELIFY_LOCAL_MODEL` 为 GGUF 资产路径，不是凭据；7B 时另设 `CUELIFY_LOCAL_MODEL_ID=hy-mt2-7b-q4km`。
+普通测试跳过真实 GPU 用例。显式准备模型后，在 Windows x64 上执行下面的可维护测试；它会通过生产下载服务准备运行包，生成新的短句、取消一次生成并验证后续请求和进程释放。`CUELIFY_LOCAL_MODEL` 为 GGUF 资产路径，不是凭据；7B 时另设 `CUELIFY_LOCAL_MODEL_ID=hy-mt2-7b-q4km`，Qwen 时设 `CUELIFY_LOCAL_MODEL_ID=qwen3.5-9b-q4km`。
 
 ```powershell
-$env:CUELIFY_LOCAL_MODEL = '<已准备的官方 GGUF 绝对路径>'
+$env:CUELIFY_LOCAL_MODEL = '<已准备的 GGUF 绝对路径>'
 $env:CUELIFY_LOCAL_ARTIFACTS = Join-Path (Get-Location) 'artifacts/local-acceptance'
 dotnet test tests/Cuelify.Tests/Cuelify.Tests.csproj -c Release --filter 'FullyQualifiedName~LocalGpuAcceptanceTests'
 ```

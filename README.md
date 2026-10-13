@@ -7,7 +7,7 @@ Cuelify 是 Windows x64 字幕桌面工具：在项目中管理多个本地视�
 - 项目和媒体任务持久化，项目内顺序处理，也可单独操作一个媒体。
 - FFmpeg 音频处理与 Silero VAD 静音优先分片，保留原媒体时间轴。
 - ElevenLabs Scribe 词级语音识别，成功分片自动缓存。
-- OpenAI-compatible、DeepSeek 官方 API、本地模型推理三种翻译引擎；支持官方模型下载与选择。
+- OpenAI-compatible、DeepSeek 官方 API、本地模型推理三种翻译引擎；支持预置模型下载与选择。
 - 独立字幕管线：程序分句后翻译、模型分句后翻译；可自定义分句和翻译的提示词、参数与字幕显示目标。
 - VAD 分片、ASR、字幕分句和翻译有独立结果；可继续未完成部分、仅重试失败部分或重新执行本步骤。
 - 原译文对照、阶段进度、取消、单条/多选重翻、旧版本与当前译文 SRT 导出。
@@ -41,8 +41,11 @@ Cuelify 是 Windows x64 字幕桌面工具：在项目中管理多个本地视�
 | Hy-MT2-1.8B | Q6_K | [腾讯](https://huggingface.co/tencent/Hy-MT2-1.8B-GGUF) |
 | Hy-MT2-7B | Q4_K_M | [腾讯](https://huggingface.co/tencent/Hy-MT2-7B-GGUF) |
 | Index-Translate-9B | Q4_K_M | [IndexTeam](https://huggingface.co/IndexTeam/Index-Translate-9B-GGUF) |
+| Qwen3.5-9B | Q4_K_M | [Unsloth GGUF](https://huggingface.co/unsloth/Qwen3.5-9B-GGUF)，[Qwen 原模型](https://huggingface.co/Qwen/Qwen3.5-9B) |
 
-在「设置 → 翻译服务」选择「本地模型推理」及模型，点击「下载模型」。下载文件和默认模型路径直接位于 `%LOCALAPPDATA%\Cuelify\`，与 `settings.json` 同级；本地文件使用稳定的模型 ID 命名，与官方仓库文件名独立。每次下载动态查询官方当前版本、文件名、大小与可用哈希，不在程序中冻结这些值。下载支持取消和续传，校验通过后才替换正式文件；保存设置后用于新任务。手动选择已有文件只检查路径和可读性，无需联网，也不核对文件名、哈希、架构或量化是否匹配预设。模型能否加载由 llama.cpp 判断，失败详情记录到日志；使用已有模型无需访问 Hugging Face。
+Qwen 的 GGUF 由 Unsloth 量化提供。默认关闭思考，采样为 temperature 0.7、top_p 0.8、top_k 20、repeat_penalty 1.0；管线步骤的显式参数优先于模型默认值。可在分句步骤选择 Qwen，在结果步骤选择 Hy；更改选择用于下一次重新执行，不改写已有版本。
+
+在「设置 → 翻译服务」选择「本地模型推理」及模型，点击「下载模型」。下载文件和默认模型路径直接位于 `%LOCALAPPDATA%\Cuelify\`，与 `settings.json` 同级；本地文件使用稳定的模型 ID 命名，与来源仓库文件名独立。每次下载动态查询来源仓库当前版本、文件名、大小与可用哈希，不在程序中冻结这些值。下载支持取消和续传，校验通过后才替换正式文件；保存设置后用于新任务。手动选择已有文件只检查路径和可读性，无需联网，也不核对文件名、哈希、架构或量化是否匹配预设。模型能否加载由 llama.cpp 判断，失败详情记录到日志；使用已有模型无需访问 Hugging Face。
 
 llama.cpp 下载动态读取 [官方发布](https://github.com/ggml-org/llama.cpp/releases)中的 Windows x64 Vulkan 包（包括滚动预发布），校验 SHA-256 后解压到 `%LOCALAPPDATA%\Cuelify\llama.cpp\<版本>-<包哈希前缀>\`。下载支持取消和续传；不同版本分别保存，更新不覆盖原任务引用的运行程序。下载成功后保存设置，再点击「测试本地翻译」。手动指定程序需保留它的配套 DLL；程序会检查接口能力和 Vulkan 支持。运行包下载需要访问 GitHub，安装后本地生成无需联网。
 

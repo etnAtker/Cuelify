@@ -1,6 +1,6 @@
 # 验证状态与后续开发入口
 
-基线日期：2026-10-12。这里区分历史真实联调、当前代码自动化和未完成的发行/人工验收；不能把全部项目笼统标为完成。本文件是后续 Agent 的交接入口，更新时记录实际证据及适用版本，不只修改测试总数。
+基线日期：2026-10-13。这里区分历史真实联调、当前代码自动化和未完成的发行/人工验收；不能把全部项目笼统标为完成。本文件是后续 Agent 的交接入口，更新时记录实际证据及适用版本，不只修改测试总数。
 
 ## 当前实现
 
@@ -9,6 +9,21 @@
 已加入主密码加密凭证、三服务密钥隔离及按步骤的凭据检查；模型档案不携带密钥，也不提供多账户凭据管理。整体跨平台发行适配尚未实施。完整发行和真实服务验收需按下面证据范围评估。
 
 维护者已指定自有代码与文档使用 [MIT 许可证](../../LICENSE)，Copyright (c) 2026 etnAtker；发行包包含项目许可证并保留第三方声明，见 D010。项目许可选择不代表所有原生间接组件的发行义务已经完成核验。
+
+## Qwen3.5-9B 本地模型预设
+
+2026-10-13，按用户批准的 D028 加入 Qwen3.5-9B Q4_K_M（Unsloth GGUF），本地预设增至四个。沿用动态模型下载、配置加载补入档案和各步骤独立选择；默认温度 0.7、top_p 0.8、top_k 20、repeat_penalty 1.0，关闭思考。原选择、步骤默认模型、历史快照及配置/task schema 保留；已有试用文件可直接复用。来源与 Apache-2.0 声明已同步更新。
+
+Windows 原生 Release 定向测试：Core/Infrastructure **37** 项、Desktop **23** 项通过，零失败/跳过，构建无警告/错误；未重跑全量。覆盖动态修订/文件名发现、排除 mmproj 及其他量化文件、下载校验/续传/取消、默认采样传入协议与步骤参数覆盖、旧配置补入 Qwen、已有文件选择/保存、步骤默认模型及快照保持、浅深色模型选择控件。命令及报告：
+
+    dotnet test tests/Cuelify.Tests/Cuelify.Tests.csproj -c Release --no-restore --filter 'FullyQualifiedName~ModelDownloadTests|FullyQualifiedName~EmbeddedModelOptionsTests|FullyQualifiedName~LocalServerTests' --logger 'trx;LogFileName=qwen-catalog-core.trx'
+    dotnet test tests/Cuelify.Desktop.Tests/Cuelify.Desktop.Tests.csproj -c Release --no-restore --filter 'FullyQualifiedName~EmbeddedModelWorkflowTests|FullyQualifiedName~PipelineIsolationTests|FullyQualifiedName~InferenceUiTests' --logger 'trx;LogFileName=qwen-catalog-desktop.trx'
+
+本轮使用生产目录身份 `qwen3.5-9b-q4km`、已有 GGUF 和 b11540 Vulkan 运行包，经正式引擎及 SourceTexts 契约生成 **1** 次，未读取生成缓存；RTX 4070 Laptop GPU 卸载 **33/33** 层，13 token、EOS，输出 `{"texts":["起きたの？","おはよう。"]}`，精确映射并完整覆盖抽取的 10 个既有 ASR token，进程释放。正式下载服务实时发现指定 Q4_K_M 文件及修订；本轮未重新下载权重或运行包，未重新计算手动文件内容哈希。证据为忽略目录 artifacts/qwen-catalog/evidence.json、server.log，包含来源元数据、实际模型文件版本、默认参数、请求参数、模板和生成记录。
+
+此前三模型比较属于独立探索证据，位于 artifacts/qwen-comparison/：同一媒体五组日语 ASR、815 词，另对比 82 条统一程序分句和 40 条完整句，共 126 次真实本地生成。Qwen 分句更倾向保留独立回应，Hy 翻译相对稳，但助手仅按 ASR 文字审阅，未听音或开展独立盲评；不同采样、单次小样本不构成通用排名。本轮加入列表只验证运行接入，不补充翻译质量结论，也未开展不同温度或 Qwen 分句＋Hy 翻译组合的完整质量验收。
+
+本轮没有 ElevenLabs、兼容 API 或 DeepSeek 新请求，没有修改用户配置、项目或缓存。原生 GUI 人工、高 DPI、独立发行机器和整片质量验收未执行。git diff --check 通过。
 
 ## WordEnds 移除与工作流程重构
 

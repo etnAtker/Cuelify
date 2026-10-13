@@ -33,7 +33,7 @@ public sealed class ModelDownloadService(HttpClient http) : IModelDownloadServic
                 && Regex.IsMatch(name, $@"(?:^|[-._]){model.Quantization}(?:\.gguf)$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
         }).ToArray();
         if (string.IsNullOrWhiteSpace(revision) || files.Length != 1)
-            throw new InvalidDataException("官方仓库中的模型文件无法确定，请稍后重试或手动选择模型文件。");
+            throw new InvalidDataException("模型来源仓库中的文件无法确定，请稍后重试或手动选择模型文件。");
         var selected = files[0];
         var fileName = selected.GetProperty("rfilename").GetString()!;
         long? size = selected.TryGetProperty("size", out var bytes) && bytes.TryGetInt64(out var length) ? length : null;
@@ -44,7 +44,7 @@ public sealed class ModelDownloadService(HttpClient http) : IModelDownloadServic
             if (lfs.TryGetProperty("sha256", out var digest)) hash = digest.GetString()?.ToLowerInvariant();
         }
         if (size is <= 0 || (hash is not null && !Regex.IsMatch(hash, "^[0-9a-f]{64}$")))
-            throw new InvalidDataException("官方模型信息无效，请稍后重试。");
+            throw new InvalidDataException("模型来源信息无效，请稍后重试。");
         return new(model.Repository, revision, fileName, size, hash);
     }
 
@@ -54,7 +54,7 @@ public sealed class ModelDownloadService(HttpClient http) : IModelDownloadServic
         Directory.CreateDirectory(root);
         var target = Path.Combine(root, model.DefaultFileName);
         await using var downloadLock = new FileStream(target + ".download.lock", FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
-        progress.Report(new("查询官方模型信息"));
+        progress.Report(new("查询模型来源信息"));
         var artifact = await ResolveAsync(model, token);
         if (File.Exists(target))
         {
@@ -84,7 +84,7 @@ public sealed class ModelDownloadService(HttpClient http) : IModelDownloadServic
     {
         var info = new FileInfo(path);
         if (!info.Exists) throw new FileNotFoundException("找不到模型文件。", path);
-        if (artifact.Size is { } size && info.Length != size) throw new InvalidDataException("模型大小与官方文件不符，请重新下载。");
+        if (artifact.Size is { } size && info.Length != size) throw new InvalidDataException("模型大小与来源文件不符，请重新下载。");
         await using (var file = File.OpenRead(path))
         {
             var magic = new byte[4];
