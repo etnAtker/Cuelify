@@ -36,7 +36,7 @@ public sealed class SubtitlePipelineCloudTests
         var progress = new Progress<TranslationProgress>(); var watch = Stopwatch.StartNew();
         using var http = new HttpClient();
         var engine = new RecordingEngine(new DeepSeekOfficialProvider(http, () => key, settings.CloudOptions(), settings.ThinkingOptions()), root);
-        var generated = await new SubtitlePipelineOrchestrator(engine, Path.Combine(root, "Pipelines")).GenerateAsync(words, source.Cues,
+        var generated = await new SubtitlePipelineOrchestrator(engine, Path.Combine(root, "Pipelines")).GenerateAsync(words,
             source.Duration, settings.GetPipeline(), settings.TranslationSettings(), progress, timeout.Token);
         Assert.Equal(string.Concat(words.Select(w => w.Text)), string.Concat(generated.Cues.Select(c => c.SourceText)));
         var translated = await jobs.TranslateAsync(generated.Cues, settings, key, null, progress, timeout.Token);

@@ -10,6 +10,24 @@
 
 维护者已指定自有代码与文档使用 [MIT 许可证](../../LICENSE)，Copyright (c) 2026 etnAtker；发行包包含项目许可证并保留第三方声明，见 D010。项目许可选择不代表所有原生间接组件的发行义务已经完成核验。
 
+## WordEnds 移除与工作流程重构
+
+2026-10-13，按已批准的 D027 实施。移除 WordEnds 模型分句、数字协议解析/GBNF 和旧 split 请求缓存恢复；原始 JSON 只在读取边界识别旧格式。完整旧分句与译文保留预览、设为当前、翻译和导出；未完成旧分句只能重新执行，创建 SourceTexts 新版本。旧快照、历史文件及缓存保留，现行格式编号和缓存身份保持不变，配置/task schema 仍为 5/3。
+
+共用模型执行字段、步骤快照与凭证判断、单媒体/批量执行、阶段结果读取、行投影和选择保持、同一冻结字幕的进度合并、导出及重试延迟。补齐本地超时快照，纯本地批量不解锁凭证；已有版本继续不要求当前模型草稿有效。结果/元数据保存失败不跳过失败状态收尾，保存与执行异常同时发生时保留两者；聚合后的凭证错误仍停止批量。新结果初始化清除被重翻的旧译文，避免交错进度恢复已清除值。
+
+Windows 原生环境执行 Release 构建，零警告/零错误；最终普通回归 Core/Infrastructure **282** 项、Desktop **216** 项通过，共 **498** 项，零失败/跳过。GPU 和显式云端联调用例通过筛选排除，不计入本轮通过数。执行命令：
+
+    dotnet build Cuelify.slnx -c Release --no-restore
+    dotnet test Cuelify.slnx -c Release --no-restore --filter 'FullyQualifiedName!~Gpu&FullyQualifiedName!~SubtitlePipelineCloudTests' --logger 'trx;LogFileName=refactor-final-tests.trx' --blame-hang-timeout 30s
+    dotnet test tests/Cuelify.Desktop.Tests/Cuelify.Desktop.Tests.csproj -c Release --no-restore --filter 'FullyQualifiedName!~Gpu&FullyQualifiedName!~SubtitlePipelineCloudTests' --logger 'trx;LogFileName=refactor-desktop-final.trx' --blame-hang-timeout 30s
+
+核心最终证据为 Cuelify.Tests/TestResults/refactor-final-tests.trx；桌面在批量快照修正后单独完成全量，最终证据为 Cuelify.Desktop.Tests/TestResults/refactor-desktop-final.trx（均在 tests 下的忽略目录）。中间新增测试先修正了 JSON 排版比较以及 Windows 文件覆盖异常类型断言，最终结果以上述报告为准。最后清理写入后从未读取的窗口字段、无效提供商/流程参数和重复通知后，再次执行 Release 全解决方案构建（零警告/零错误），并定向复测桌面工作流、版本、管线隔离和提示词 **135** 项，全部通过；报告为 Cuelify.Desktop.Tests/TestResults/refactor-cleanup-final.trx。git diff --check 通过。
+
+新增回归覆盖旧完整分支翻译/导出/切回及原始快照值保留，旧未完成分句步骤/批量入口限制，新格式缓存与取消恢复，本地超时、纯本地批量、已有快照继续、结果与元数据写入失败、聚合凭证错误停止批量、交错通知和所选重翻清除。原有导航、版本隔离、浅深色及小窗口 headless 测试随桌面回归通过。
+
+本轮没有新增 ElevenLabs、兼容 API、DeepSeek 真实请求或本地 Vulkan 生成，没有下载模型/运行包，也没有修改用户项目数据或全局配置。云端协议及推理相关自动化使用测试替身，历史真实证据不作为本轮验收。没有进行原生 GUI 人工、高 DPI、独立发行机器或真实服务/GPU 回归；此次未改变 SourceTexts 的生成请求及合法路径，真实集成仍是独立证据范围。
+
 ## 统一进度显示
 
 2026-10-12，按已批准的进度调查范围实施。全局活动栏覆盖媒体处理、导入、重新定位校验、下载、连接测试和短 I/O 等待；步骤、设置准备、下载、凭证和历史加载复用同一显示与 4px 样式。分片分子阶段按真实字节/片数计量；ASR 保留成功分片比例并区分上传/服务等待/验收；模型分句计确认词，程序分句使用阶段等待；翻译及所选重翻按本次字幕范围计量。批量显示独立媒体汇总。取消立即显示正在取消，拒绝晚到通知；未知总量和减少动画不伪造比例，短操作 300ms 后显示。原项目数据、已有结果、缓存身份和配置/task schema 不变。
@@ -22,7 +40,7 @@ Release 构建零警告/零错误。普通全量回归核心 283 项通过、4 �
 
 ## 原文数组分句与 ASR/分句进度
 
-2026-10-12，实施已批准的 D026。新分句采用 texts 原文数组、紧凑相对时间词表和跨块末句暂存；Core 精确映射连续词范围，本地 GBNF 保留全部合法路径。缓存使用 segmentation-texts-v1，保存成功响应和容量缩块记录；取消、恢复与最后窗口失败重试复用已接受前缀。旧缺失格式字段的步骤快照仍为 WordEnds，旧算法、缓存和结果保留，新执行才捕获 SourceTexts。分句按依赖顺序执行，翻译并发不变。
+2026-10-12，实施已批准的 D026。新分句采用 texts 原文数组、紧凑相对时间词表和跨块末句暂存；Core 精确映射连续词范围，本地 GBNF 保留全部合法路径。缓存使用 segmentation-texts-v1，保存成功响应和容量缩块记录；取消、恢复与最后窗口失败重试复用已接受前缀。当时旧缺失格式字段的步骤快照仍为 WordEnds，旧算法、缓存和结果保留，新执行才捕获 SourceTexts；旧执行兼容现已由 D027 移除。分句按依赖顺序执行，翻译并发不变。
 
 ASR 与分句在全局活动栏和当前步骤显示真实计数及百分比。ASR 失败不计入完成，显示运行/失败/等待；分句暂存末句不计入已确认词。总量未知时保留等待指示。切换媒体、步骤或历史预览不显示其他版本的步骤进度，开始新操作及切换批量媒体时清空旧比例。浅色 1240×828、深色 900×608 headless 截图通过布局检查，产物在 artifacts/segmentation-texts/ui/；使用测试替身，不是原生 GUI 人工验收。
 

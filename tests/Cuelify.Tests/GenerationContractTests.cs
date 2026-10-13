@@ -9,7 +9,7 @@ namespace Cuelify.Tests;
 
 public sealed class GenerationContractTests
 {
-    private static SubtitlePipelineProfile Legacy => SubtitlePipelinePresets.TwoStage with { SegmentationFormat = SegmentationOutputFormat.WordEnds };
+    private static SubtitlePipelineProfile Profile => SubtitlePipelinePresets.TwoStage;
     [Fact]
     public void ModelCanChooseUnpunctuatedParticleAndShortCommaBoundaries()
     {
@@ -17,10 +17,10 @@ public sealed class GenerationContractTests
             new("の", TimeSpan.FromSeconds(1.3), TimeSpan.FromSeconds(2), "a"),
             new("続き,", TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2.2), "b"),
             new("本文", TimeSpan.FromSeconds(4.3), TimeSpan.FromSeconds(5), "b")];
-        var profile = Legacy;
+        var profile = Profile;
         var block = PipelinePromptBuilder.Plan(words, profile).Single();
-        Assert.Equal(4, PipelinePromptBuilder.Parse("{\"ends\":[0,1,2,3]}", words, block, profile).Count);
-        Assert.Single(PipelinePromptBuilder.Parse("{\"ends\":[3]}", words, block, profile));
+        Assert.Equal(4, PipelinePromptBuilder.Parse("{\"texts\":[\"文\",\"の\",\"続き,\",\"本文\"]}", words, block, profile).Count);
+        Assert.Single(PipelinePromptBuilder.Parse("{\"texts\":[\"文の続き,本文\"]}", words, block, profile));
         Assert.Same(block.OutputContract, PipelinePromptBuilder.Build(words, block, profile, new()).OutputContract);
     }
 
@@ -33,25 +33,27 @@ public sealed class GenerationContractTests
             new("見", TimeSpan.FromSeconds(1339.192), TimeSpan.FromSeconds(1339.192), null),
             new("て", TimeSpan.FromSeconds(1339.332), TimeSpan.FromSeconds(1339.332), null),
             new("。", TimeSpan.FromSeconds(1339.332), TimeSpan.FromSeconds(1339.332), null)];
-        var profile = Legacy;
+        var profile = Profile;
         var block = PipelinePromptBuilder.Plan(words, profile).Single();
         Assert.Equal([new SourceWordRange(0, 1), new SourceWordRange(2, 5)],
-            PipelinePromptBuilder.Parse("{\"ends\":[1,5]}", words, block, profile));
-        Assert.Equal(3, PipelinePromptBuilder.Parse("{\"ends\":[1,2,5]}", words, block, profile).Count);
-        Assert.Throws<InvalidDataException>(() => PipelinePromptBuilder.Parse("{\"ends\":[5]}", words, block, profile));
+            PipelinePromptBuilder.Parse("{\"texts\":[\"本当\",\"？見て。\"]}", words, block, profile));
+        Assert.Equal(3, PipelinePromptBuilder.Parse("{\"texts\":[\"本当\",\"？\",\"見て。\"]}", words, block, profile).Count);
+        Assert.Throws<InvalidDataException>(() => PipelinePromptBuilder.Parse("{\"texts\":[\"本当？見て。\"]}", words, block, profile));
     }
 
     [Fact]
     public void SegmentationParserAndLocalGrammarUseTheSameLegalPaths()
     {
         var contract = new GenerationOutputContract { Kind = GenerationOutputKind.Segmentation,
+            SegmentationFormat = SegmentationOutputFormat.SourceTexts, SourceWords = ["a", "b", "c", "d"],
             FirstWord = 0, LastWord = 3, AllowedEnds = new() { [0] = [0, 1], [1] = [3], [2] = [2], [3] = [3] } };
-        Assert.Equal(2, contract.ParseRanges("{\"ends\":[0,3]}").Count);
-        Assert.Equal(3, contract.ParseRanges("{\"ends\":[1,2,3]}").Count);
-        Assert.Throws<InvalidDataException>(() => contract.ParseRanges("{\"ends\":[2,3]}"));
+        Assert.Equal(2, contract.ParseRanges("{\"texts\":[\"a\",\"bcd\"]}").Count);
+        Assert.Equal(3, contract.ParseRanges("{\"texts\":[\"ab\",\"c\",\"d\"]}").Count);
+        Assert.Throws<InvalidDataException>(() => contract.ParseRanges("{\"texts\":[\"abc\",\"d\"]}"));
         Assert.Throws<InvalidDataException>(() => contract.ParseRanges("{\"segments\":[{\"end\":3,\"text\":\"译文\"}]}"));
         var grammar = OutputGrammarCompiler.Compile(contract);
-        Assert.Contains("s0 ::= \"0\" \",\" s1 | \"1\" \",\" s2", grammar);
+        Assert.Contains("s0 ::=", grammar);
+        Assert.Contains("s1 ::=", grammar);
         Assert.DoesNotContain("string", grammar);
     }
 
@@ -72,14 +74,14 @@ public sealed class GenerationContractTests
     {
         using var directory = new TestDirectory(); var engine = new Engine();
         WordToken[] words = [new("你好。", TimeSpan.Zero, TimeSpan.FromSeconds(1), null)];
-        var service = new SubtitlePipelineOrchestrator(engine, directory.Path); var pipeline = Legacy;
-        await service.GenerateAsync(words, [], TimeSpan.FromSeconds(2), pipeline, new());
+        var service = new SubtitlePipelineOrchestrator(engine, directory.Path); var pipeline = Profile;
+        await service.GenerateAsync(words, TimeSpan.FromSeconds(2), pipeline, new());
         var changed = pipeline with { Translation = pipeline.Translation with { UserTemplate = "改变翻译 {cues_json}" }, LineCharacters = 30 };
-        var cached = await service.GenerateAsync(words, [], TimeSpan.FromSeconds(2), changed, new());
+        var cached = await service.GenerateAsync(words, TimeSpan.FromSeconds(2), changed, new());
         Assert.Equal(0, cached.EngineCalls); Assert.Equal(1, cached.CacheHits);
         engine.Broken = true;
         await Assert.ThrowsAsync<InvalidDataException>(() => new SubtitlePipelineOrchestrator(engine, directory.File("other"))
-            .GenerateAsync(words, [], TimeSpan.FromSeconds(2), pipeline, new() { MaximumAttempts = 2, RetryDelay = TimeSpan.Zero }));
+            .GenerateAsync(words, TimeSpan.FromSeconds(2), pipeline, new() { MaximumAttempts = 2, RetryDelay = TimeSpan.Zero }));
         Assert.Equal(3, engine.Calls);
     }
     private sealed class Engine : ITranslationEngine
@@ -89,7 +91,7 @@ public sealed class GenerationContractTests
         public Task<TranslationResponse> TranslateAsync(TranslationRequest request, CancellationToken cancellationToken)
         {
             Calls++; Assert.Equal(GenerationOutputKind.Segmentation, request.OutputContract!.Kind);
-            return Task.FromResult(new TranslationResponse(Broken ? "{\"ends\":[99]}" : JsonSerializer.Serialize(new { ends = new[] { 0 } })));
+            return Task.FromResult(new TranslationResponse(Broken ? "{\"texts\":[\"改写\"]}" : JsonSerializer.Serialize(new { texts = request.OutputContract.SourceWords })));
         }
     }
 }

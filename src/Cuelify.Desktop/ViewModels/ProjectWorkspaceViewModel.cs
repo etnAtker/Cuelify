@@ -53,7 +53,6 @@ public partial class ProjectWorkspaceViewModel : ObservableObject
     private int _resultRevision;
     private bool _loadingVersions;
     private bool _selectingMedia;
-    private bool _loadedOutput;
     private string? _mediaId;
     private string? _projectId;
     private MediaTaskDocument? _task;
@@ -96,9 +95,10 @@ public partial class ProjectWorkspaceViewModel : ObservableObject
     public ObservableCollection<ChunkRow> Chunks { get; } = [];
     public ObservableCollection<FailedUnitRow> FailedUnits { get; } = [];
     [ObservableProperty] private double mediaPaneWidth = 190;
-    public ObservableCollection<CueRow> Cues { get; } = [];
+    private readonly SubtitleRowsViewModel _previewRows = new();
+    public ObservableCollection<CueRow> Cues => _previewRows.Rows;
     private IReadOnlyList<CueRow> _allCues = [];
-    public SelectionModel<CueRow> Selection { get; } = new() { SingleSelect = false };
+    public SelectionModel<CueRow> Selection => _previewRows.Selection;
     public ObservableCollection<ResultVersion> Versions { get; } = [];
     public ObservableCollection<ModelChoice> Models { get; } = [];
     public ObservableCollection<SubtitlePipelineProfile> Pipelines { get; } = [];
@@ -287,10 +287,10 @@ public partial class ProjectWorkspaceViewModel : ObservableObject
     {
         var changed = _mediaId != media?.Document.Id || _projectId != project?.Id;
         _mediaId = media?.Document.Id; _projectId = project?.Id; _task = media?.Document;
-        if (_task is null) { ++_resultRevision; _loadedOutput = false; Words.Clear(); Chunks.Clear(); Cues.Clear(); Versions.Clear(); CanExport = false; Refresh(); return; }
+        if (_task is null) { ++_resultRevision; Words.Clear(); Chunks.Clear(); Cues.Clear(); Versions.Clear(); CanExport = false; Refresh(); return; }
         var settings = _owner.MediaSettings(media!);
         _segmentationMethod = settings.GetPipeline().Method;
-        Flow = FlowText(settings);
+        Flow = FlowText();
         var priorKind = SelectedStep?.Kind;
         _selectingMedia = true;
         Steps.Clear(); foreach (var kind in TaskStagePlan.Steps()) Steps.Add(new(kind, kind switch { TaskStage.Chunking => "分片", TaskStage.Asr => "识别词", TaskStage.Subtitles => "分句", _ => "结果" }));
@@ -299,7 +299,6 @@ public partial class ProjectWorkspaceViewModel : ObservableObject
         SelectedStep ??= Steps.LastOrDefault(s => _task.Stage(s.Kind).Version.Length > 0) ?? Steps.First();
         ResultTab = Steps.IndexOf(SelectedStep); SegmentationView = SelectedStep.Kind == TaskStage.Subtitles;
         _selectingMedia = false;
-        _loadedOutput = _task.Stages.Any(s => s.State == ProcessingState.Completed);
         LoadStepModel(); RebuildStepOperations(); await LoadVersionsAsync(); Refresh();
     }
     private async Task LoadVersionsAsync()
@@ -330,35 +329,35 @@ public partial class ProjectWorkspaceViewModel : ObservableObject
             if (selected is not null)
             {
                 var stage = selected.Record;
-                var settings = stage.Settings is { } snapshot ? PipelineSettingsMigration.Upgrade(snapshot).Deserialize<AppSettings>() : null;
+                var settings = ConfigurationStore.ReadSnapshot(stage.Settings);
                 settingsText = settings is null ? "" : DescribeSettings(settings) + (kind == TaskStage.Translation || kind == TaskStage.Subtitles && settings.GetPipeline().Method != SegmentationMethod.Program ? " · " + settings.ModelName() : "");
                 error = stage.Error;
                 if (kind == TaskStage.Asr) failures.AddRange(stage.FailedUnits.Select(id => new FailedUnitRow(int.TryParse(id, out var index) ? $"分片 {index + 1}" : id, stage.UnitErrors.GetValueOrDefault(id, "识别失败，请重试。"))));
-                if (stage.ResultPath.Length > 0 && File.Exists(_store.ResolveResult(projectId, task.Id, stage.ResultPath)))
+                if (stage.ResultPath.Length > 0)
                 {
                 if (kind == TaskStage.Asr)
                 {
-                    var data = await _store.ReadResultAsync<TranscriptionResult>(projectId, task.Id, stage.ResultPath);
+                    var data = await StageResultReader.ReadAsync<TranscriptionResult>(_store, projectId, task, stage);
                     if (data is not null) words.AddRange(data.Words.Select((word, index) => new WordRow(index + 1, word)));
                 }
                 else if (kind == TaskStage.Chunking)
                 {
-                    var data = await _store.ReadResultAsync<ChunkingResult>(projectId, task.Id, stage.ResultPath);
+                    var data = await StageResultReader.ReadAsync<ChunkingResult>(_store, projectId, task, stage);
                     if (data is not null) chunks.AddRange(data.Files.Select(f => new ChunkRow(f, "已完成")));
                 }
                 else
                 {
-                    var segmentation = kind == TaskStage.Subtitles ? await _store.ReadResultAsync<SubtitlePipelineResult>(projectId, task.Id, stage.ResultPath) : null;
-                    var translated = kind == TaskStage.Translation ? await _store.ReadResultAsync<TranslationResult>(projectId, task.Id, stage.ResultPath) : null;
+                    var segmentation = kind == TaskStage.Subtitles ? await StageResultReader.ReadAsync<SubtitlePipelineResult>(_store, projectId, task, stage) : null;
+                    var translated = kind == TaskStage.Translation ? await StageResultReader.ReadAsync<TranslationResult>(_store, projectId, task, stage) : null;
                     var data = segmentation?.Cues ?? translated?.Cues;
                     var sourceRanges = segmentation?.Ranges ?? translated?.Ranges;
-                    if (data is not null) cues = data.Select((cue, index) => new CueRow(cue, index + 1)
-                    { State = stage.FailedUnits.Contains(cue.Id) ? CueTranslationState.Failed : CueTranslationState.Waiting,
-                        WordRange = sourceRanges?.Count > index ? $"识别词 {sourceRanges[index].First + 1}–{sourceRanges[index].Last + 1}" : "",
-                        FailureReason = stage.FailedUnits.Contains(cue.Id) ? stage.UnitErrors.GetValueOrDefault(cue.Id, "") : "" }).ToArray();
-                    complete = kind == TaskStage.Translation && stage.State == ProcessingState.Completed && data?.Count > 0 && data.All(c => AlignmentValidator.IsValid(c.TranslatedText ?? ""));
+                    if (data is not null) cues = SubtitleRowsViewModel.Project(data, stage, sourceRanges);
+                    complete = kind == TaskStage.Translation && stage.State == ProcessingState.Completed && data is not null && SubtitleRowsViewModel.IsComplete(data);
                 }
                 }
+                error = stage.Error;
+                if (stage.State != ProcessingState.Completed && StageExecutionPolicy.IsRetired(kind, stage))
+                    error = StageExecutionPolicy.LegacySegmentationMessage;
             }
         }
         catch (Exception e) when (e is IOException or InvalidDataException or ArgumentException) { error = UserErrorMessages.FromException(e); }
@@ -373,9 +372,7 @@ public partial class ProjectWorkspaceViewModel : ObservableObject
     }
     private void FilterCues()
     {
-        var ids = Selection.SelectedItems.Select(c => c!.Id).ToHashSet();
-        Selection.Clear(); Cues.Clear(); foreach (var cue in _allCues.Where(c => !FailedOnly || c.IsFailed)) Cues.Add(cue);
-        for (var index = 0; index < Cues.Count; index++) if (ids.Contains(Cues[index].Id)) Selection.Select(index);
+        _previewRows.Set(_allCues.Where(c => !FailedOnly || c.IsFailed).ToArray());
         Refresh();
     }
     public void ApplyProgress(MediaTaskItem item, ProjectTaskProgress progress)
@@ -390,8 +387,11 @@ public partial class ProjectWorkspaceViewModel : ObservableObject
         Refresh();
         if (item.Document.Id != _mediaId || progress.Cues is null || !ShowCues || Version is { Current: false }) return;
         if (progress.Stage != ResultStage) return;
-        _allCues = progress.Cues.Select((cue, index) => new CueRow(cue, index + 1)
-        { State = progress.FailedIds?.Contains(cue.Id) == true ? CueTranslationState.Failed : CueTranslationState.Translating }).ToArray();
+        var incoming = progress.Message == "CuesReady" ? progress.Cues : TranslationResult.MergeAccepted(progress.Cues, _allCues.Select(c => c.Cue));
+        var record = item.Document.Stage(progress.Stage);
+        _allCues = SubtitleRowsViewModel.Project(incoming, record);
+        foreach (var row in _allCues.Where(r => r.Cue.TranslatedText is null && progress.CueIds?.Contains(r.Id) == true))
+            row.State = CueTranslationState.Translating;
         CanExport = false; FilterCues();
     }
     internal void ResetProgress()
@@ -454,8 +454,8 @@ public partial class ProjectWorkspaceViewModel : ObservableObject
     private Task ExportAsync()
     {
         if (!CanExport || _task is null || _projectId is null || Version is null) return Task.CompletedTask;
-        return _owner.ExportWorkspaceVersionAsync(_projectId, _task, Version.Record, _allCues.Select(c => c.Cue).ToArray());
+        return _owner.ExportWorkspaceVersionAsync(_task, Version.Record, _allCues.Select(c => c.Cue).ToArray());
     }
     public static string DescribeSettings(AppSettings settings) => $"{settings.GetPipeline().Name} · {settings.SourceLanguage} → {settings.TargetLanguage}";
-    public static string FlowText(AppSettings settings) => "分片 → 识别词 → 分句 → 结果";
+    public static string FlowText() => "分片 → 识别词 → 分句 → 结果";
 }

@@ -45,8 +45,8 @@ public sealed record SubtitlePipelineProfile(string Name, SegmentationMethod Met
     public double MinimumCueSeconds { get; init; } = .7;
     public int LineCharacters { get; init; } = 22;
     public double ReadingCharactersPerSecond { get; init; } = 12;
-    public SegmentationOutputFormat SegmentationFormat { get; init; }
-    [JsonIgnore] public object SegmentationIdentity => SegmentationFormat == SegmentationOutputFormat.WordEnds || Method == SegmentationMethod.Program
+    public SegmentationOutputFormat SegmentationFormat { get; init; } = SegmentationOutputFormat.SourceTexts;
+    [JsonIgnore] public object SegmentationIdentity => Method == SegmentationMethod.Program
         ? new { Method, Segmentation = Method == SegmentationMethod.Model ? Segmentation : null,
         BlockSeconds = Method == SegmentationMethod.Model ? BlockSeconds : 0, ContextCharacters = Method == SegmentationMethod.Model ? ContextCharacters : 0,
         MaximumCueSeconds, MinimumCueSeconds }

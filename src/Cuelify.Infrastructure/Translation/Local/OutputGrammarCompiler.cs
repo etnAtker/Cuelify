@@ -14,12 +14,10 @@ public static class OutputGrammarCompiler
         static string Literal(string text) => JsonSerializer.Serialize(text);
         if (contract.Kind == GenerationOutputKind.Segmentation)
         {
-            var texts = contract.SegmentationFormat == SegmentationOutputFormat.SourceTexts;
-            var grammar = new StringBuilder($"root ::= {Literal(texts ? "{\"texts\":[" : "{\"ends\":[")} s{contract.FirstWord} {Literal("]}")}\n");
+            var grammar = new StringBuilder($"root ::= {Literal("{\"texts\":[")} s{contract.FirstWord} {Literal("]}")}\n");
             foreach (var (start, ends) in contract.AllowedEnds)
-                grammar.Append($"s{start} ::= ").AppendJoin(" | ", ends.Select(end => Literal(texts
-                    ? JsonSerializer.Serialize(contract.SourceText(start, end), SourceJsonOptions)
-                    : end.ToString(System.Globalization.CultureInfo.InvariantCulture)) +
+                grammar.Append($"s{start} ::= ").AppendJoin(" | ", ends.Select(end => Literal(
+                    JsonSerializer.Serialize(contract.SourceText(start, end), SourceJsonOptions)) +
                     (end == contract.LastWord ? "" : " " + Literal(",") + " s" + (end + 1)))).AppendLine();
             return grammar.ToString();
         }

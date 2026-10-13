@@ -13,7 +13,7 @@ public sealed partial class SubtitlePipelineOrchestrator
         CancellationToken token, IReadOnlySet<string>? retryBlocks)
     {
         settings.Validate();
-        _ = PipelinePromptBuilder.Plan(words, profile);
+        PipelinePromptBuilder.ValidateInput(words, profile);
         var identity = AtomicFile.Hash(new { engine.CacheIdentity, Profile = profile.SegmentationIdentity,
             settings.SourceLanguage, settings.TargetLanguage, settings.TargetStyle, Words = words, Duration = duration, Schema = "segmentation-texts-v1" });
         var directory = Path.Combine(cacheRoot, identity); Directory.CreateDirectory(directory);
@@ -96,12 +96,13 @@ public sealed partial class SubtitlePipelineOrchestrator
                     catch (Exception e) when (!token.IsCancellationRequested && attempt < settings.MaximumAttempts &&
                         (e is InvalidDataException or HttpRequestException or TimeoutException || e is TranslationServiceException { IsTransient: true }))
                     {
-                        var delay = e is TranslationServiceException { RetryAfter: { } wait } ? wait : settings.RetryDelay;
-                        if (delay > settings.MaximumRetryDelay) throw;
+                        var delay = RetryDelay.Calculate(settings.RetryDelay, settings.MaximumRetryDelay, attempt,
+                            (e as TranslationServiceException)?.RetryAfter, exponential: false);
+                        if (delay is null) throw;
                         if (e is InvalidDataException) request = request with { Messages = request.Messages.Append(new PromptMessage("user",
                             "上次结果未通过校验：" + e.Message + "\n请逐字复制本块原文，不能增删标点；时间跨度包括停顿，返回完整 texts JSON。")).ToArray() };
                         Report(unit, ProcessingState.Running, "RetryWaiting", running: 1);
-                        await Task.Delay(delay, token);
+                        await Task.Delay(delay.Value, token);
                     }
                 }
             }

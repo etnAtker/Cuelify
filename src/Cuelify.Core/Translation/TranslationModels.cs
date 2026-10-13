@@ -63,6 +63,13 @@ public interface ITranslationEngine
 public sealed record AlignmentResult(IReadOnlyDictionary<string, string> Translations, IReadOnlyList<string> FailedIds);
 public sealed record TranslationResult(IReadOnlyList<SubtitleCue> Cues, IReadOnlyList<string> FailedIds, int EngineCalls, int CacheHits)
 {
+    // 只合并同一冻结字幕的有效进度，不能把另一版本的译文带入当前结果。
+    public static IReadOnlyList<SubtitleCue> MergeAccepted(IReadOnlyList<SubtitleCue> incoming, IEnumerable<SubtitleCue> previous)
+    {
+        var accepted = previous.ToDictionary(c => c.Id);
+        return incoming.Select(c => c.TranslatedText is null && accepted.TryGetValue(c.Id, out var old) &&
+            c.Start == old.Start && c.End == old.End && c.SourceText == old.SourceText ? c with { TranslatedText = old.TranslatedText } : c).ToArray();
+    }
     public IReadOnlyList<SourceWordRange> Ranges { get; init; } = [];
     public IReadOnlyDictionary<string, string> FailureReasons { get; init; } = new Dictionary<string, string>();
     public bool IsComplete => FailedIds.Count == 0;

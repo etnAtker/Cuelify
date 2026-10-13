@@ -169,7 +169,7 @@ public partial class MainWindowViewModel
             if (item is null)
             {
                 _restoringTask = true;
-                InputPath = ""; _taskOptionBase = null; _jobSettings = null; _jobSource = null; _isComplete = false; _hasFinalCues = false;
+                InputPath = ""; _taskOptionBase = null; _jobSettings = null; _isComplete = false;
                 CanContinue = false; SetRows([]); ApplyTaskDefaults(); Step = WorkflowStep.File; _loadedMediaId = null;
                 _restoringTask = false;
                 await Workspace.SelectAsync(SelectedProject, null);
@@ -178,27 +178,8 @@ public partial class MainWindowViewModel
             var task = item.Document; var project = SelectedProject;
             if (project is null) return;
             var projectId = project.Id;
-            async Task<T?> Read<T>(TaskStage kind) where T : class
-            {
-                var stage = task.Stage(kind);
-                if (stage.ResultPath.Length == 0) return null;
-                if (!File.Exists(_projects.ResolveResult(projectId, task.Id, stage.ResultPath)))
-                {
-                    if (stage.State == ProcessingState.Completed) { stage.ResultUnavailable = true; stage.Error = "阶段结果文件缺失，请恢复或重新执行本步骤。"; }
-                    return null;
-                }
-                try
-                {
-                    var result = await _projects.ReadResultAsync<T>(projectId, task.Id, stage.ResultPath);
-                    if (result is not null)
-                    {
-                        if (stage.ResultUnavailable && stage.State == ProcessingState.Completed) stage.Error = "";
-                        stage.ResultUnavailable = false;
-                    }
-                    return result;
-                }
-                catch (InvalidDataException e) { stage.ResultUnavailable = true; stage.Error = e.Message; return null; }
-            }
+            Task<T?> Read<T>(TaskStage kind) where T : class =>
+                StageResultReader.ReadAsync<T>(_projects, projectId, task, task.Stage(kind));
             var source = await Read<TranscriptionResult>(TaskStage.Asr);
             task.Duration ??= source?.Duration;
             var generated = await Read<SubtitlePipelineResult>(TaskStage.Subtitles);
@@ -212,16 +193,12 @@ public partial class MainWindowViewModel
             TaskProviderIndex = (int)_taskOptionBase.Provider; TaskSourceLanguage = _taskOptionBase.SourceLanguage; TaskTargetLanguage = _taskOptionBase.TargetLanguage;
             _taskPipelineId = _taskOptionBase.GetPipeline().Id; RefreshTaskPipelines();
             var active = task.Translation.Settings ?? task.Subtitles.Settings ?? task.Asr.Settings;
-            _jobSettings = ConfigurationStore.ReadSnapshot(active); _jobSource = source; _hasFinalCues = generated is not null || translated?.Cues.Count > 0;
+            _jobSettings = ConfigurationStore.ReadSnapshot(active);
             ProjectTaskService.RefreshValidity(task);
-            SetRows(translated?.Cues ?? generated?.Cues ?? [], task.Translation.FailedUnits.ToHashSet());
-            foreach (var row in Rows) row.FailureReason = task.Translation.UnitErrors.GetValueOrDefault(row.Id, "");
-            foreach (var row in Rows.Where(r => r.Cue.TranslatedText is null))
-                row.State = task.Translation.UnitStates.GetValueOrDefault(row.Id) switch
-                { ProcessingState.Running => CueTranslationState.Translating, ProcessingState.Cancelled => CueTranslationState.Cancelled,
-                    ProcessingState.Failed => CueTranslationState.Failed, _ => CueTranslationState.Waiting };
+            _currentRows.Set(SubtitleRowsViewModel.Project(translated?.Cues ?? generated?.Cues ?? [], task.Translation, translated?.Ranges ?? generated?.Ranges));
+            OnPropertyChanged(nameof(ResultSummary)); OnPropertyChanged(nameof(HasRows));
             Error = "";
-            _isComplete = task.Translation.IsReady && translated is not null && Rows.All(r => AlignmentValidator.IsValid(r.Cue.TranslatedText ?? ""));
+            _isComplete = task.Translation.IsReady && translated is not null && SubtitleRowsViewModel.IsComplete(Rows.Select(r => r.Cue));
             CanContinue = task.Stages.Any(stage => stage.Version.Length > 0) && !_isComplete;
             Step = task.Stages.Any(stage => stage.Version.Length > 0) ? WorkflowStep.Results : WorkflowStep.Options;
             Status = task.Translation.NeedsUpdate ? "上游结果已更新，请更新字幕" : _isComplete ? "翻译完成，可以导出字幕" : "可按步骤处理";
@@ -366,31 +343,13 @@ public partial class MainWindowViewModel
         OnPropertyChanged(nameof(ChunkingSummary)); OnPropertyChanged(nameof(AsrSummary)); OnPropertyChanged(nameof(SubtitlesSummary)); OnPropertyChanged(nameof(TranslationSummary));
     }));
     private async Task RunCurrentTaskAsync(CancellationToken token, TaskStage? kind = null, ProcessingMode mode = ProcessingMode.Complete,
-        IReadOnlySet<string>? selectedIds = null, AppSettings? overrideSettings = null, MediaTaskItem? target = null, bool useGeneratedTranslations = false)
+        IReadOnlySet<string>? selectedIds = null, AppSettings? overrideSettings = null, MediaTaskItem? target = null)
     {
         var item = target ?? await EnsureTaskAsync(); var project = _operationProject ?? SelectedProject!;
         _operationProject = project;
         if (SelectedMedia == item && kind is null) { Page = AppPage.Workspace; Workspace.SelectedStep = Workspace.Steps.FirstOrDefault(s => s.Kind == TaskStage.Translation); }
-        _mediaOperationTarget = item;
-        if (SelectedMedia == item) Workspace.FollowCurrent();
-        var settings = overrideSettings ?? (SelectedMedia == item ? TaskSettings() : ConfigurationStore.ReadSnapshot(item.Document.Options) ?? TaskSettings()); ConfigurationStore.ValidateSecrets(settings, Secrets);
-        using var projectLock = _projects.AcquireProject(project.Id);
-        if (overrideSettings is null) item.Document.Options = JsonSerializer.SerializeToElement(settings);
-        await _projects.SaveTaskAsync(project.Id, item.Document, token);
-        _jobInputPath = item.Document.InputPath;
-        _isComplete = false;
-        try
-        {
-            if (kind is null) await _taskExecutor.RunAllAsync(project, item.Document, settings, TaskProgress(item, token), token);
-            else await _taskExecutor.RunStageAsync(project, item.Document, kind.Value, mode, settings, TaskProgress(item, token), token, selectedIds, useGeneratedTranslations: useGeneratedTranslations);
-        }
-        finally
-        {
-            await FlushPreparationAsync();
-            await _navigationTask;
-            if (SelectedMedia is not null) await RestoreSelectedTaskAsync(SelectedMedia);
-            RefreshProjectState();
-        }
+        var settings = overrideSettings ?? (SelectedMedia == item ? TaskSettings() : ConfigurationStore.ReadSnapshot(item.Document.Options) ?? TaskSettings());
+        await RunMediaCoreAsync(project, item, settings, kind, mode, selectedIds, StageOperation.Generate, token, saveOptions: overrideSettings is null);
     }
     private bool CanRunStage(string? operation)
     {
@@ -413,29 +372,10 @@ public partial class MainWindowViewModel
     [RelayCommand(CanExecute = nameof(CanBatch))]
     private Task RunProjectAsync() => ExecuteAsync(async token =>
     {
-        await _navigation; var project = SelectedProject!;
-        using var projectLock = _projects.AcquireProject(project.Id);
-        var batch = MediaTasks.Select(item => (Item: item, Settings: ConfigurationStore.ReadSnapshot(item.Document.Options) ?? ConfigurationStore.ReadSnapshot(project.DefaultSettings) ?? TaskSettings())).ToArray();
-        _hasStartedProcessing = true;
-        try
-        {
-            foreach (var (item, settings) in batch)
-            {
-                token.ThrowIfCancellationRequested();
-                _mediaOperationTarget = item;
-                try { await _taskExecutor.RunAllAsync(project, item.Document, settings, TaskProgress(item, token), token); }
-                catch (Cuelify.Infrastructure.ServiceCredentialException) { throw; }
-                catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
-                catch (Exception e) { AddLog($"{item.Name}：{UserErrorMessages.FromException(e)}"); }
-                item.Refresh();
-            }
-        }
-        finally
-        {
-            await FlushPreparationAsync();
-            if (SelectedMedia is not null) await RestoreSelectedTaskAsync(SelectedMedia);
-            RefreshProjectState();
-        }
+        await _navigation;
+        var project = SelectedProject!;
+        var plan = CreateBatchPlan(project, MediaTasks.Where(i => StageExecutionPolicy.NeededStages(i.Document).Count > 0).Select(i => i.Document.Id).ToArray(), false, false, false);
+        await RunBatchCoreAsync(project, plan, token);
     }, mediaJob: true);
     [RelayCommand(CanExecute = nameof(CanConfigure))]
     private void UseSavedTaskSettings()
@@ -451,12 +391,9 @@ public partial class MainWindowViewModel
             var result = await _projects.ReadResultAsync<TranslationResult>(SelectedProject.Id, task.Id, stale ? task.Translation.ResultPath : task.Translation.PreviousResultPath)
                 ?? throw new InvalidDataException("上一版本结果缺失。");
             var settings = ConfigurationStore.ReadSnapshot(stale ? task.Translation.Settings : task.Translation.PreviousSettings) ?? throw new InvalidDataException("上一版本配置缺失。");
-            var file = await _dialogs.SaveSrtAsync($"{Path.GetFileNameWithoutExtension(task.InputPath)}.{settings.TargetLanguage}.previous.srt");
-            if (file is null) return;
-            if (Path.GetExtension(file).ToLowerInvariant() != ".srt" || Path.GetFullPath(file).Equals(Path.GetFullPath(task.InputPath), StringComparison.OrdinalIgnoreCase))
-                throw new ArgumentException("请选择有效的 SRT 输出路径，不能覆盖原媒体。");
-            if (File.Exists(file) && !await _dialogs.ConfirmAsync("目标 SRT 已存在，确认覆盖？")) return;
-            await AtomicFile.WriteTextAsync(file, SrtSerializer.SerializeTranslated(result.Cues), true, CancellationToken.None);
+            var path = await _exporter.ExportAsync(task.InputPath, settings.TargetLanguage, result.Cues,
+                () => true, () => BeginFeedback("正在导出 SRT 字幕…"), previous: true);
+            if (path is not null) AddLog("SRT 已导出：" + path);
         }
         catch (Exception e) { ReportError(e); }
     }

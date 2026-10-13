@@ -130,12 +130,11 @@ public sealed class TranscriptionPipeline(IAudioProcessor audioProcessor, IVoice
                         }
                         catch (Exception exception) when (CanRetry(exception, cancellationToken) && attempt < options.MaximumAttempts)
                         {
-                            var delay = TimeSpan.FromTicks((long)Math.Min(options.MaximumRetryDelay.Ticks,
-                                options.InitialRetryDelay.Ticks * Math.Pow(2, attempt - 1)));
-                            if (exception is AsrServiceException { RetryAfter: { } retryAfter } && retryAfter > delay) delay = retryAfter;
-                            if (delay > options.MaximumRetryDelay) throw; // 不违背服务 Retry-After 提前重试。
+                            var delay = RetryDelay.Calculate(options.InitialRetryDelay, options.MaximumRetryDelay, attempt,
+                                (exception as AsrServiceException)?.RetryAfter, exponential: true);
+                            if (delay is null) throw;
                             progress?.Report(new("RetryWaiting", chunk.Index, chunks.Length));
-                            await Task.Delay(delay, cancellationToken);
+                            await Task.Delay(delay.Value, cancellationToken);
                         }
                     }
                 }

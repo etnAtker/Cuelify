@@ -7,6 +7,19 @@ namespace Cuelify.Core.Translation;
 public static class PipelineSettingsMigration
 {
     public const string LegacyJointId = "pipeline-joint";
+    // 只识别历史元数据，不转换已执行版本的快照或结果。
+    public static bool IsLegacySegmentation(JsonElement? settings)
+    {
+        if (settings is not { } json) return false;
+        var id = SelectedId(json);
+        if (id is not null && json.TryGetProperty("PipelineLibrary", out var library) && library.TryGetProperty(id, out var pipeline))
+        {
+            var model = pipeline.TryGetProperty("Method", out var method) ? method.GetInt32() == 1 :
+                pipeline.TryGetProperty("Mode", out var mode) && mode.GetInt32() != 0;
+            return model && (!pipeline.TryGetProperty("SegmentationFormat", out var format) || format.GetInt32() == 0);
+        }
+        return id is null || id == SubtitlePipelinePresets.TwoStage.Id || id == LegacyJointId;
+    }
     public static bool IsJoint(JsonElement? settings)
     {
         if (settings is not { } json) return false;
@@ -35,6 +48,11 @@ public static class PipelineSettingsMigration
                 profile["Method"] = legacyMode == 0 ? 0 : 1;
                 profile.Remove("Mode");
             }
+        // 编辑和显示模型只使用现行格式；执行准入仍检查未经转换的阶段快照。
+        if (node["PipelineLibrary"] is JsonObject profiles)
+            foreach (var value in profiles.Select(p => p.Value).OfType<JsonObject>())
+                if (value["Method"]?.GetValue<int>() == 1 && (value["SegmentationFormat"] is null || value["SegmentationFormat"]!.GetValue<int>() == 0))
+                    value["SegmentationFormat"] = (int)SegmentationOutputFormat.SourceTexts;
         foreach (var key in new[] { "DefaultPipelineId", "TaskPipelineId" })
             if (node[key]?.GetValue<string>() == LegacyJointId) node[key] = SubtitlePipelinePresets.TwoStage.Id;
         if (node["PipelineModelDefaults"] is JsonObject defaults && defaults[LegacyJointId] is { } oldDefaults)

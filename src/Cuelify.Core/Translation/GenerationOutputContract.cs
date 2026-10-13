@@ -6,7 +6,8 @@ using Cuelify.Core.Subtitles;
 namespace Cuelify.Core.Translation;
 
 public enum GenerationOutputKind { Segmentation, Translation }
-public enum SegmentationOutputFormat { WordEnds, SourceTexts }
+// 0 为已停用的旧格式；保留 texts 的序列化编号和缓存身份。
+public enum SegmentationOutputFormat { SourceTexts = 1 }
 
 // 描述业务输出，与提供商及 decoder 的约束语法无关。
 public sealed record GenerationOutputContract
@@ -29,7 +30,7 @@ public sealed record GenerationOutputContract
         try
         {
             using var json = JsonDocument.Parse(response);
-            var property = SegmentationFormat == SegmentationOutputFormat.SourceTexts ? "texts" : "ends";
+            const string property = "texts";
             if (json.RootElement.ValueKind != JsonValueKind.Object || json.RootElement.EnumerateObject().Count() != 1 ||
                 !json.RootElement.TryGetProperty(property, out var rows) || rows.ValueKind != JsonValueKind.Array)
                 throw new InvalidDataException($"分句应只返回 {property} 数组。");
@@ -37,11 +38,9 @@ public sealed record GenerationOutputContract
             var ranges = new List<SourceWordRange>();
             foreach (var row in rows.EnumerateArray())
             {
-                var end = SegmentationFormat == SegmentationOutputFormat.SourceTexts ? FindTextEnd(row.GetString(), next) : row.GetInt32();
+                var end = FindTextEnd(row.GetString(), next);
                 if (!AllowedEnds.TryGetValue(next, out var allowed) || !allowed.Contains(end))
-                    throw new InvalidDataException(SegmentationFormat == SegmentationOutputFormat.SourceTexts
-                        ? $"原文片段「{row.GetString()}」超出最长字幕时间，请拆开这条原文；时间跨度包括停顿。"
-                        : $"分句起点 {next} 不能选择末词 {end}；允许的末词为 [{string.Join(',', allowed ?? [])}]。请完整输出。");
+                    throw new InvalidDataException($"原文片段「{row.GetString()}」超出最长字幕时间，请拆开这条原文；时间跨度包括停顿。");
                 ranges.Add(new(next, end)); next = end + 1;
             }
             if (next != LastWord + 1) throw new InvalidDataException($"分句未覆盖全部词，最终末词应为 {LastWord}。请完整输出。");

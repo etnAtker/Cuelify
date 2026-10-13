@@ -21,20 +21,20 @@ public sealed class StageProgressTests
     private static Task Flush() => Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Background).GetTask();
 
     [Fact]
-    public void OldSnapshotsKeepEndsWhileNewExecutionCapturesTexts()
+    public void OldSnapshotsAreRecognizedWithoutChangingTheirStoredMetadata()
     {
         using var fixture = new Fixture(); var settings = fixture.Store.CreateDefaults();
         var snapshot = JsonSerializer.SerializeToNode(StageSettingsSnapshot.Capture(TaskStage.Subtitles, settings))!.AsObject();
         var id = snapshot["TaskPipelineId"]!.GetValue<string>();
         snapshot["PipelineLibrary"]![id]!.AsObject().Remove("SegmentationFormat");
-        var old = ConfigurationStore.ReadSnapshot(JsonSerializer.SerializeToElement(snapshot))!;
-        Assert.Equal(SegmentationOutputFormat.WordEnds, old.GetPipeline().SegmentationFormat);
-        var current = old.ForStep(TaskStage.Subtitles);
-        Assert.Equal(SegmentationOutputFormat.SourceTexts, current.GetPipeline().SegmentationFormat);
-        Assert.Equal(SegmentationOutputFormat.WordEnds, old.GetPipeline().SegmentationFormat);
-        var stage = new StageRecord { Settings = StageSettingsSnapshot.Capture(TaskStage.Subtitles, current) };
-        Assert.False(ProjectTaskService.ConfigurationChanged(stage, TaskStage.Subtitles, old));
-        Assert.Equal(SegmentationOutputFormat.SourceTexts, ConfigurationStore.ReadSnapshot(stage.Settings)!.GetPipeline().SegmentationFormat);
+        var old = JsonSerializer.SerializeToElement(snapshot);
+        Assert.True(PipelineSettingsMigration.IsLegacySegmentation(old));
+        var displayed = ConfigurationStore.ReadSnapshot(old)!;
+        Assert.Equal(SegmentationOutputFormat.SourceTexts, displayed.GetPipeline().SegmentationFormat);
+        Assert.False(old.GetProperty("PipelineLibrary").GetProperty(id).TryGetProperty("SegmentationFormat", out _));
+        var current = StageSettingsSnapshot.Capture(TaskStage.Subtitles, displayed.ForStep(TaskStage.Subtitles));
+        Assert.False(PipelineSettingsMigration.IsLegacySegmentation(current));
+        Assert.Equal(1, current.GetProperty("PipelineLibrary").EnumerateObject().Single().Value.GetProperty("SegmentationFormat").GetInt32());
     }
 
     [AvaloniaTheory]

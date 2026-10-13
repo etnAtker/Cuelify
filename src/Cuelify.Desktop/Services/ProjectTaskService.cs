@@ -1,4 +1,4 @@
-using System.Text.Json;
+using System.Runtime.ExceptionServices;
 using Cuelify.Core.Projects;
 using Cuelify.Core.Subtitles;
 using Cuelify.Core.Translation;
@@ -18,7 +18,7 @@ public sealed class ProjectTaskService(IDesktopJobService jobs, ProjectStore sto
     Func<string> speechKey, Func<AppSettings, string> translationKey, Func<AppSettings, string>? credentialHint = null,
     Func<AppSettings, CancellationToken, Task>? prepareTranslation = null)
 {
-    public static string ConfigurationIdentity(TaskStage kind, AppSettings settings, bool includeSegmentationModel = true)
+    public static string ConfigurationIdentity(TaskStage kind, AppSettings settings)
     {
         var pipeline = settings.GetPipeline();
         return kind switch
@@ -29,7 +29,7 @@ public sealed class ProjectTaskService(IDesktopJobService jobs, ProjectStore sto
             TaskStage.Asr => AtomicFile.Hash(new { settings.AsrModel, settings.SourceCode }),
             TaskStage.Subtitles => AtomicFile.Hash(new { Pipeline = pipeline.SegmentationIdentity, settings.ZeroDurationToleranceMs,
                 settings.SourceLanguage, settings.TargetLanguage, settings.TargetStyle,
-                Model = pipeline.Method == SegmentationMethod.Program || !includeSegmentationModel ? null : ModelProfile.ExecutionParameters(settings) }),
+                Model = pipeline.Method == SegmentationMethod.Program ? null : ModelProfile.ExecutionParameters(settings) }),
             _ => AtomicFile.Hash(new { Model = ModelProfile.ExecutionParameters(settings), Pipeline = pipeline.TranslationIdentity, settings.SourceLanguage, settings.TargetLanguage, settings.TargetStyle })
         };
     }
@@ -37,7 +37,6 @@ public sealed class ProjectTaskService(IDesktopJobService jobs, ProjectStore sto
     {
         if (stage.Settings is not { } snapshot) return false;
         var current = ConfigurationStore.Snapshot(settings);
-        if (kind == TaskStage.Subtitles) current.UseSourceTextSegmentation();
         return ConfigurationIdentity(kind, ConfigurationStore.ReadSnapshot(snapshot)!) != ConfigurationIdentity(kind, current);
     }
 
@@ -52,12 +51,13 @@ public sealed class ProjectTaskService(IDesktopJobService jobs, ProjectStore sto
         }
     }
     public async Task RunStageAsync(ProjectDocument project, MediaTaskDocument task, TaskStage kind, ProcessingMode mode, AppSettings requested,
-        IProgress<ProjectTaskProgress> progress, CancellationToken token, IReadOnlySet<string>? selectedIds = null, bool prepare = true,
-        bool useGeneratedTranslations = false, bool allowFrozenSubtitles = false, StageOperation operation = StageOperation.Generate)
+        IProgress<ProjectTaskProgress> progress, CancellationToken token, IReadOnlySet<string>? selectedIds = null,
+        StageOperation operation = StageOperation.Generate)
     {
-        var pipelineMode = requested.GetPipeline().Method;
         if (!TaskStagePlan.Steps().Contains(kind)) throw new ArgumentException("当前管线没有此步骤。");
         var previous = task.Stage(kind);
+        if (mode != ProcessingMode.Restart && previous.State != ProcessingState.Completed && StageExecutionPolicy.IsRetired(kind, previous))
+            throw new ArgumentException(StageExecutionPolicy.LegacySegmentationMessage);
         var upstreamKind = TaskStagePlan.Upstream(kind);
         var upstream = upstreamKind is { } parent ? task.Stage(parent) : null;
         if (upstream is not null && !upstream.IsReady) throw new ArgumentException("请先完成上游步骤并设为当前。");
@@ -73,11 +73,10 @@ public sealed class ProjectTaskService(IDesktopJobService jobs, ProjectStore sto
             throw new ArgumentException("此版本已完成，请重新执行本步骤以生成新版本。");
         }
         var creating = mode == ProcessingMode.Restart || previous.Version.Length == 0;
-        var settings = creating ? requested.ForStep(kind, task) : ConfigurationStore.Snapshot(ConfigurationStore.ReadSnapshot(previous.Settings) ?? requested.ForStep(kind, task));
+        var settings = StageExecutionPolicy.ResolveSettings(task, kind, mode, requested);
         if (!creating) operation = previous.Operation;
-        else if (selectedIds is not null || allowFrozenSubtitles) operation = StageOperation.Retranslate;
-        var executionMode = settings.GetPipeline().Method;
-        var needsModel = kind == TaskStage.Translation || kind == TaskStage.Subtitles && executionMode != SegmentationMethod.Program;
+        else if (selectedIds is not null) operation = StageOperation.Retranslate;
+        var needsModel = StageExecutionPolicy.NeedsModel(kind, settings);
         ConfigurationStore.ValidateSecrets(settings, [speechKey(), translationKey(settings)]);
         if (kind == TaskStage.Asr && string.IsNullOrWhiteSpace(speechKey())) throw new Cuelify.Infrastructure.ServiceCredentialException("ElevenLabs");
         IReadOnlyList<SubtitleCue>? accepted = null;
@@ -101,7 +100,6 @@ public sealed class ProjectTaskService(IDesktopJobService jobs, ProjectStore sto
         var resultFile = Path.Combine(directory, "result.json"); Directory.CreateDirectory(directory);
         stage.ResultPath = Path.GetRelativePath(store.MediaDirectory(project.Id, task.Id), resultFile);
         stage.State = ProcessingState.Running; stage.NeedsUpdate = false; stage.ResultUnavailable = false; stage.Error = "";
-        await store.SaveTaskAsync(project.Id, task, token);
         Task writes = Task.CompletedTask; var gate = new object();
         void Report(TranslationProgress value)
         {
@@ -114,8 +112,7 @@ public sealed class ProjectTaskService(IDesktopJobService jobs, ProjectStore sto
                 }
                 if (kind == TaskStage.Translation && value.Cues is not null)
                 {
-                    var priorTranslations = accepted?.ToDictionary(c => c.Id, c => c.TranslatedText);
-                    accepted = value.Cues.Select(c => c.TranslatedText is null ? c with { TranslatedText = priorTranslations?.GetValueOrDefault(c.Id) } : c).ToArray();
+                    accepted = TranslationResult.MergeAccepted(value.Cues, accepted ?? []);
                     var partial = new TranslationResult(accepted, value.FailedIds ?? [], 0, 0) { Ranges = ranges };
                     writes = writes.ContinueWith(async earlier => { await earlier; await AtomicFile.WriteJsonAsync(resultFile, partial, CancellationToken.None); },
                         CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default).Unwrap();
@@ -126,15 +123,24 @@ public sealed class ProjectTaskService(IDesktopJobService jobs, ProjectStore sto
             }
             progress.Report(new(kind, value.Stage, value.Cues, value.FailedIds, value.CueIds) { WorkProgress = value.WorkProgress });
         }
+        Exception? failure = null;
+        void RecordPersistenceFailure(Exception error)
+        {
+            if (!ReferenceEquals(failure, error))
+                failure = failure is null ? error : new AggregateException("处理或结果保存失败。", failure, error);
+            if (stage.State != ProcessingState.Cancelled) stage.State = ProcessingState.Failed;
+            stage.Error = UserErrorMessages.FromException(failure);
+        }
         try
         {
+            await store.SaveTaskAsync(project.Id, task, token);
             progress.Report(new(kind, "开始处理"));
             if (needsModel)
             {
                 ConfigurationStore.Validate(settings, validateAllProfiles: false, step: kind);
                 if (settings.Provider != TranslationProvider.Local && (string.IsNullOrWhiteSpace(translationKey(settings)) || !string.IsNullOrEmpty(credentialHint?.Invoke(settings))))
                     throw new Cuelify.Infrastructure.ServiceCredentialException("翻译服务");
-                if (prepare && prepareTranslation is not null) await prepareTranslation(settings, token);
+                if (prepareTranslation is not null) await prepareTranslation(settings, token);
             }
             switch (kind)
             {
@@ -180,7 +186,6 @@ public sealed class ProjectTaskService(IDesktopJobService jobs, ProjectStore sto
                     progress.Report(new(kind, "Completed", segmented.Cues));
                     break;
                 case TaskStage.Translation:
-                    var engineCalls = 0; var cacheHits = 0;
                     if (accepted is null)
                     {
                         var segmentation = await store.ReadResultAsync<SubtitlePipelineResult>(project.Id, task.Id, stage.InputResultPath, token) ?? throw new InvalidDataException("分句结果缺失。");
@@ -198,7 +203,7 @@ public sealed class ProjectTaskService(IDesktopJobService jobs, ProjectStore sto
                         ? new TranslationResult(accepted, [], 0, 0)
                         : await jobs.TranslateStageAsync(accepted, settings, translationKey(settings), directory, stage.ReuseSharedCache, forced, new InlineProgress<TranslationProgress>(Report), token);
                     await writes;
-                    translated = translated with { Ranges = ranges, EngineCalls = translated.EngineCalls + engineCalls, CacheHits = translated.CacheHits + cacheHits };
+                    translated = translated with { Ranges = ranges };
                     await AtomicFile.WriteJsonAsync(resultFile, translated, CancellationToken.None);
                     stage.FailedUnits = translated.FailedIds.ToList();
                     stage.UnitErrors = translated.FailureReasons.ToDictionary(k => k.Key, k => UserErrorMessages.FromCategory(k.Value));
@@ -213,31 +218,41 @@ public sealed class ProjectTaskService(IDesktopJobService jobs, ProjectStore sto
         }
         catch (Exception e)
         {
-            await writes; stage.State = token.IsCancellationRequested ? ProcessingState.Cancelled : ProcessingState.Failed;
+            failure = e;
+            stage.State = token.IsCancellationRequested ? ProcessingState.Cancelled : ProcessingState.Failed;
             if (e is TranscriptionFailedException failed)
             {
                 stage.FailedUnits = failed.FailedChunks.Select(i => i.ToString()).ToList();
                 stage.UnitErrors = failed.Categories.ToDictionary(k => k.Key.ToString(), k => UserErrorMessages.FromCategory(k.Value));
             }
-            else if (kind == TaskStage.Subtitles)
-                stage.FailedUnits = Directory.GetFiles(directory, "*.failed", SearchOption.AllDirectories).Select(f => Path.GetFileName(f)[..^7]).ToList();
+            else if (kind == TaskStage.Subtitles && Directory.Exists(directory))
+            {
+                try { stage.FailedUnits = Directory.GetFiles(directory, "*.failed", SearchOption.AllDirectories).Select(f => Path.GetFileName(f)[..^7]).ToList(); }
+                catch (Exception error) { RecordPersistenceFailure(error); }
+            }
             else if (kind == TaskStage.Chunking && !token.IsCancellationRequested) stage.FailedUnits = ["chunking"];
-            stage.Error = UserErrorMessages.FromException(e); throw;
+            stage.Error = UserErrorMessages.FromException(failure);
+            try { await writes; }
+            catch (Exception writeError) { RecordPersistenceFailure(writeError); }
         }
         finally
         {
             stage.UpdatedAt = DateTimeOffset.UtcNow;
             foreach (var id in stage.UnitStates.Where(u => u.Value == ProcessingState.Running).Select(u => u.Key).ToArray())
                 stage.UnitStates[id] = token.IsCancellationRequested ? ProcessingState.Cancelled : ProcessingState.Failed;
-            await AtomicFile.WriteJsonAsync(Path.Combine(directory, "stage.json"), stage, CancellationToken.None);
-            if (creating) await store.SelectDownstreamAsync(project.Id, task, kind, CancellationToken.None);
-            RefreshValidity(task); await store.SaveTaskAsync(project.Id, task, CancellationToken.None);
+            try { await AtomicFile.WriteJsonAsync(Path.Combine(directory, "stage.json"), stage, CancellationToken.None); }
+            catch (Exception error) { RecordPersistenceFailure(error); }
+            try { if (creating) await store.SelectDownstreamAsync(project.Id, task, kind, CancellationToken.None); }
+            catch (Exception error) { RecordPersistenceFailure(error); }
+            RefreshValidity(task);
+            try { await store.SaveTaskAsync(project.Id, task, CancellationToken.None); }
+            catch (Exception error) { RecordPersistenceFailure(error); }
         }
+        if (failure is not null) ExceptionDispatchInfo.Capture(failure).Throw();
     }
     public static void RefreshValidity(MediaTaskDocument task)
     {
         foreach (var stage in task.Stages.Where(s => s.Version.Length > 0 && s.UpstreamStage is not null))
             stage.NeedsUpdate = stage.UpstreamStage is { } upstream && (!task.Stage(upstream).IsReady || stage.UpstreamVersionId != task.Stage(upstream).Version);
     }
-    private sealed class InlineProgress<T>(Action<T> report) : IProgress<T> { public void Report(T value) => report(value); }
 }

@@ -252,11 +252,11 @@ public sealed class TranslationOrchestrator(ITranslationEngine engine, string? c
         }
         async Task<bool> Delay(Exception exception, int attempt)
         {
-            var delay = TimeSpan.FromTicks((long)Math.Min(settings.MaximumRetryDelay.Ticks, settings.RetryDelay.Ticks * Math.Pow(2, attempt - 1)));
-            if (exception is TranslationServiceException { RetryAfter: { } retryAfter } && retryAfter > delay) delay = retryAfter;
-            if (delay > settings.MaximumRetryDelay) return false;
+            var delay = RetryDelay.Calculate(settings.RetryDelay, settings.MaximumRetryDelay, attempt,
+                (exception as TranslationServiceException)?.RetryAfter, exponential: true);
+            if (delay is null) return false;
             ReportWork("RetryWaiting");
-            await Task.Delay(delay, cancellationToken);
+            await Task.Delay(delay.Value, cancellationToken);
             return true;
         }
         async Task<Dictionary<string, string>> ReadCache(string path, IReadOnlyList<SubtitleCue> batch)

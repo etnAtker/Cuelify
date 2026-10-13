@@ -41,12 +41,11 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     private readonly IDesktopJobService _jobs;
     private readonly ConfigurationStore _store;
     private readonly IWindowDialogs _dialogs;
+    private readonly SubtitleExportService _exporter;
     private CancellationTokenSource? _cancellation;
     private Task? _operation;
     private AppSettings _savedSettings = new();
     private AppSettings? _jobSettings;
-    private TranscriptionResult? _jobSource;
-    private bool _hasFinalCues;
     private string _jobInputPath = "";
     private bool _isComplete;
     private bool _isMediaJob;
@@ -80,8 +79,9 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     [ObservableProperty] private string systemTemplate = "";
     [ObservableProperty] private string userTemplate = "";
     [ObservableProperty] private string promptVariableStatus = "";
-    public ObservableCollection<CueRow> Rows { get; } = [];
-    public SelectionModel<CueRow> CueSelection { get; } = new() { SingleSelect = false };
+    private readonly SubtitleRowsViewModel _currentRows = new();
+    public ObservableCollection<CueRow> Rows => _currentRows.Rows;
+    public SelectionModel<CueRow> CueSelection => _currentRows.Selection;
     public bool HasCueSelection => CueSelection.Count > 0;
     public string CueSelectionSummary => $"已选 {CueSelection.Count} 条字幕";
     public ObservableCollection<string> Log { get; } = [];
@@ -139,14 +139,14 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     public string FileName => string.IsNullOrWhiteSpace(InputPath) ? "尚未选择文件" : Path.GetFileName(InputPath);
     public string TaskPromptSummary
     {
-        get { var profile = TaskPipeline ?? _savedSettings.GetPipeline((TranslationProvider)TaskProviderIndex); return profile.Name; }
+        get { var profile = TaskPipeline ?? _savedSettings.GetPipeline(); return profile.Name; }
     }
     public string TaskServiceSummary => TaskProviderIndex == (int)TranslationProvider.Local ? $"本地模型推理 · {EmbeddedModelCatalog.Get(_savedSettings.LocalOptions().ModelId).Name}" : $"{ProviderNames[Math.Clamp(TaskProviderIndex, 0, 2)]} · {_savedSettings.CloudModel}";
     public string SettingsHint => IsBusy ? "任务正在进行，相关设置暂时无法修改。" : HasUnsavedSettings || HasPromptEdits ? "有未保存的修改。保存后用于新的处理。" : "已保存的设置用于新的处理。";
 
     public MainWindowViewModel(IDesktopJobService jobs, ConfigurationStore store, IWindowDialogs dialogs, CredentialStore? credentials = null, IModelDownloadService? downloads = null, ILlamaPackageService? packages = null)
     {
-        _jobs = jobs; _store = store; _dialogs = dialogs; _credentials = credentials ?? new CredentialStore(store.Root);
+        _jobs = jobs; _store = store; _dialogs = dialogs; _exporter = new(dialogs); _credentials = credentials ?? new CredentialStore(store.Root);
         InitializeProjects();
         Settings = store.CreateDefaults(); InitializeModelDownloads(downloads);
         InitializeLlamaPackages(packages);
@@ -185,7 +185,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         if (args.PropertyName == nameof(AppSettings.SourceLanguage) || _loadingSettings) OnPropertyChanged(nameof(DefaultSourceLanguage));
         if (args.PropertyName == nameof(AppSettings.Provider))
         {
-            OnPropertyChanged(nameof(ProviderIndex)); OnPropertyChanged(nameof(ProviderIndex)); OnPropertyChanged(nameof(IsLocal)); OnPropertyChanged(nameof(IsCloud)); OnPropertyChanged(nameof(IsDeepSeek)); OnPropertyChanged(nameof(IsCompatible));
+            OnPropertyChanged(nameof(ProviderIndex)); OnPropertyChanged(nameof(IsLocal)); OnPropertyChanged(nameof(IsCloud)); OnPropertyChanged(nameof(IsDeepSeek)); OnPropertyChanged(nameof(IsCompatible));
         }
         if (args.PropertyName is nameof(AppSettings.Provider) or nameof(AppSettings.LocalModelId) or nameof(AppSettings.BaseUrl) or nameof(AppSettings.CloudModel) or nameof(AppSettings.DefaultPipelineId) or nameof(AppSettings.PipelineLibrary))
             RefreshPromptAssociations();
@@ -202,7 +202,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         OnPropertyChanged(nameof(TestEngineButtonText)); OnPropertyChanged(nameof(EngineTestHint)); OnPropertyChanged(nameof(TopPHint));
     }
     partial void OnInputPathChanged(string value)
-    { OnPropertyChanged(nameof(FileName)); if (_restoringTask) return; _settingMedia = true; SelectedMedia = null; _settingMedia = false; _taskOptionBase = null; CueSelection.Clear(); Rows.Clear(); _isComplete = false; _hasFinalCues = false; _jobSettings = null; _jobSource = null; CanContinue = false; Step = WorkflowStep.File; Error = ""; Status = "待开始"; MediaSummary = ""; OnPropertyChanged(nameof(FileName)); OnPropertyChanged(nameof(ResultSummary)); OnPropertyChanged(nameof(HasRows)); RefreshCommands(); }
+    { OnPropertyChanged(nameof(FileName)); if (_restoringTask) return; _settingMedia = true; SelectedMedia = null; _settingMedia = false; _taskOptionBase = null; CueSelection.Clear(); Rows.Clear(); _isComplete = false; _jobSettings = null; CanContinue = false; Step = WorkflowStep.File; Error = ""; Status = "待开始"; MediaSummary = ""; OnPropertyChanged(nameof(FileName)); OnPropertyChanged(nameof(ResultSummary)); OnPropertyChanged(nameof(HasRows)); RefreshCommands(); }
     partial void OnIsBusyChanged(bool value) { RefreshCommands(); OnPropertyChanged(nameof(IsProcessing)); OnPropertyChanged(nameof(ShowActivitySettings)); OnPropertyChanged(nameof(SettingsHint)); Workspace?.Refresh(); }
     partial void OnIsInitializingChanged(bool value) { RefreshCommands(); OnPropertyChanged(nameof(ShowProjectEmptyState)); }
     partial void OnIsSavingSettingsChanged(bool value) { RefreshCommands(); if (!value) ResumePendingWorkspaceAction(); }
@@ -376,9 +376,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         Status = Stage(value.Stage);
         if (value.Cues is not null)
         {
-            // 并发批次的通知可能交错；晚到的快照不能清除已显示的有效译文。
-            var accepted = Rows.ToDictionary(row => row.Id, row => row.Cue.TranslatedText);
-            SetRows(value.Cues.Select(cue => cue.TranslatedText is null ? cue with { TranslatedText = accepted.GetValueOrDefault(cue.Id) } : cue).ToArray(), value.FailedIds?.ToHashSet());
+            SetRows(value.Stage == "CuesReady" ? value.Cues : TranslationResult.MergeAccepted(value.Cues, Rows.Select(row => row.Cue)), value.FailedIds?.ToHashSet());
         }
         if (value.Stage is "Translating" or "TargetedRetry")
             foreach (var row in Rows.Where(row => value.CueIds.Contains(row.Id) && row.Cue.TranslatedText is null)) row.State = CueTranslationState.Translating;
@@ -411,16 +409,10 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     {
         try
         {
-            var safeLanguage = string.Concat(_jobSettings!.TargetLanguage.Where(character => !Path.GetInvalidFileNameChars().Contains(character)));
-            var file = await _dialogs.SaveSrtAsync($"{Path.GetFileNameWithoutExtension(_jobInputPath)}.{safeLanguage}.srt");
-            if (file is null) return;
-            if (Path.GetExtension(file).ToLowerInvariant() != ".srt") throw new ArgumentException("请将字幕保存为 .srt 文件。");
-            if (Path.GetFullPath(file).Equals(Path.GetFullPath(_jobInputPath), StringComparison.OrdinalIgnoreCase)) throw new ArgumentException("请选择其他保存路径，以免覆盖原媒体文件。");
-            if (File.Exists(file) && !await _dialogs.ConfirmAsync("目标 SRT 已存在，确认覆盖？")) return;
-            if (!CanExport) throw new ArgumentException("翻译设置或译文已更改，请重新完成翻译后导出。");
-            using var feedback = BeginFeedback("正在导出 SRT 字幕…");
-            await AtomicFile.WriteTextAsync(file, SrtSerializer.SerializeTranslated(Rows.Select(row => row.Cue).ToArray()), true, CancellationToken.None);
-            AddLog("SRT 已导出：" + file);
+            var settings = _jobSettings ?? throw new InvalidDataException("该版本缺少处理设置。");
+            var path = await _exporter.ExportAsync(_jobInputPath, settings.TargetLanguage, Rows.Select(r => r.Cue).ToArray(),
+                () => CanExport, () => BeginFeedback("正在导出 SRT 字幕…"));
+            if (path is not null) AddLog("SRT 已导出：" + path);
         }
         catch (Exception exception) { ReportError(exception); }
     }
@@ -456,7 +448,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
             if (mediaJob) { CanContinue = SelectedMedia is not null && SelectedMedia.Document.Stages.Any(s => s.Version.Length > 0) && !SelectedMedia.Document.Translation.IsReady; MarkUnfinishedRows(CueTranslationState.Failed); }
             else if (!probing && !IsModelDownloading && !IsLlamaInstalling) EngineStatus = "测试失败";
             if (mediaJob) Status = "处理未完成"; ReportError(exception);
-            if (mediaJob && exception is ServiceCredentialException credential)
+            if (mediaJob && UserErrorMessages.CredentialFailure(exception) is { } credential)
             { configureAfter = credential.Service == "ElevenLabs" ? ConfigureSpeech : ConfigureTranslation; }
             if (probing && exception is Win32Exception { NativeErrorCode: 2 or 3 }) configureAfter = ConfigureSpeech;
         }
@@ -466,20 +458,9 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     { foreach (var row in Rows.Where(row => row.Cue.TranslatedText is null && row.State == CueTranslationState.Translating)) row.State = state; }
     private void SetRows(IReadOnlyList<SubtitleCue> cues, IReadOnlySet<string>? failedIds = null)
     {
-        var selectedIds = CueSelection.SelectedIndexes.Select(index => Rows[index].Id).ToHashSet(StringComparer.Ordinal);
         var states = Rows.ToDictionary(row => row.Id, row => row.State);
-        var sameSequence = Rows.Count == cues.Count && Rows.Select(row => row.Id).SequenceEqual(cues.Select(cue => cue.Id));
-        CueSelection.Clear();
-        if (!sameSequence) Rows.Clear();
-        for (var index = 0; index < cues.Count; index++)
-        {
-            var state = failedIds?.Contains(cues[index].Id) == true ? CueTranslationState.Failed : states.GetValueOrDefault(cues[index].Id, CueTranslationState.Waiting);
-            if (!sameSequence) Rows.Add(new(cues[index], index + 1) { State = state });
-            else if (Rows[index].Cue != cues[index]) Rows[index] = new(cues[index], index + 1) { State = state };
-            else Rows[index].State = state;
-        }
-        for (var index = 0; index < Rows.Count; index++)
-            if (selectedIds.Contains(Rows[index].Id)) CueSelection.Select(index);
+        _currentRows.Set(cues.Select((cue, index) => new CueRow(cue, index + 1)
+        { State = failedIds?.Contains(cue.Id) == true ? CueTranslationState.Failed : states.GetValueOrDefault(cue.Id, CueTranslationState.Waiting) }).ToArray());
         OnPropertyChanged(nameof(ResultSummary)); OnPropertyChanged(nameof(HasRows)); RefreshCommands();
     }
     private void AddLog(string message)

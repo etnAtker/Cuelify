@@ -52,15 +52,15 @@ Core 定义领域模型、接口和纯逻辑，不引用 Avalonia 或 Infrastruc
 
 ## 字幕管线
 
-TaskStagePlan 固定分片→识别词→分句→结果，与分句方法、模型及提供商无关。ProgramSegmentation 复用 CueBuilder，并保留零时长词处理；SubtitlePipelineOrchestrator 只执行模型分句。两者均输出纯原文 SubtitlePipelineResult（Cues/Ranges），结果步骤只读取该结果并调用 TranslationOrchestrator；移除所有从 ASR 直接联合生成结果的执行分支。
+TaskStagePlan 固定分片→识别词→分句→结果，与分句方法、模型及提供商无关。ProgramSegmentation 复用 CueBuilder，并保留零时长词处理；SubtitlePipelineOrchestrator 的模型入口只执行 SourceTexts，程序分句分支复用 ProgramSegmentation。两者均输出纯原文 SubtitlePipelineResult（Cues/Ranges），结果步骤只读取该结果并调用 TranslationOrchestrator；移除所有从 ASR 直接联合生成结果的执行分支。
 
-`PipelinePromptBuilder` 按原词时间规划窗口，各起点允许所有满足最长字幕时间的末词 ID，没有标点、助词、说话人或固定停顿的硬筛选。新请求附连贯原文、以块起点为原点的紧凑时间词表和参考前后文，模型只输出 texts 原文数组。GenerationOutputContract 保存该块的原词文字与全部合法范围，ParseRanges 逐字映射连续词 ID 并验收时间；本地 OutputGrammarCompiler 将同一图的每条边编译为对应原文 JSON 字符串，Core 不携带 GBNF。云端同样验收，失败附具体原因并有限重试。旧快照的 WordEnds 契约与旧提示词、并发、缓存身份保留；新执行捕获 SourceTexts，字段缺失的旧快照不会被默默改用新算法。
+`PipelinePromptBuilder` 按原词时间规划窗口，各起点允许所有满足最长字幕时间的末词 ID，没有标点、助词、说话人或固定停顿的硬筛选。新请求附连贯原文、以块起点为原点的紧凑时间词表和参考前后文，模型只输出 texts 原文数组。GenerationOutputContract 保存该块的原词文字与全部合法范围，ParseRanges 逐字映射连续词 ID 并验收时间；本地 OutputGrammarCompiler 将同一图的每条边编译为对应原文 JSON 字符串，Core 不携带 GBNF。云端同样验收，失败附具体原因并有限重试。WordEnds 的执行、提示词、解析、数字 GBNF 与拆块恢复已删除。PipelineSettingsMigration 从原始 JSON 识别格式 0 或缺失格式的旧模型分句；显示配置可投影为现行类型，但原始版本快照不改写。StageExecutionPolicy 阻止未完成旧分句继续/失败重试，重新执行创建新版本；完整旧结果仍作为固定字幕供翻译及导出使用。
 
 PipelineDisplay 从模型选择的连续词范围计算纯原文 cue，合并重叠/同起点文字，在可用静音内延长显示并生成最终 ID。ProgramSegmentation 保留 CueBuilder 对零时长词的处理，再在可用静音内满足最短显示目标。原词时码不修改；最终 cue 在分句版本中固定，翻译只替换译文并按两行目标换行，不再以译文长度调整时间。
 
 新分句采用 `segmentation-texts-v1` 缓存身份，每个成功请求独立原子保存完整响应。块间按依赖顺序执行：除末块或单条响应外，确认前面各句，将最后一句连同后文再次请求；容量不足先缩小当前请求并保存 `.capacity.json`，未处理后半随暂存末句进入后续窗口。恢复从原词起点重新验收成功响应，确定相同的确认范围和暂存尾句，成功请求不重复发送。动态剩余工作单元使界面区分继续和失败重试，取消/失败不将暂存词计为完成；单词请求仍超限则明确失败。翻译请求并发不变，模型 slot 配置仍按既有模型档案分配。
 
-SegmentationIdentity 与 TranslationIdentity 分别描述本步参数，分句身份包含输出格式而不包含翻译提示词、批次、行宽和阅读速度；翻译身份不包含分句提示词、候选规划或分块参数。名称、说明、ID 不影响执行身份。旧 `segmentation-v3` 缓存和既有结果保留，继续/失败重试读取固定快照，重新执行才采用当前格式。
+SegmentationIdentity 与 TranslationIdentity 分别描述本步参数，分句身份包含输出格式而不包含翻译提示词、批次、行宽和阅读速度；翻译身份不包含分句提示词、候选规划或分块参数。名称、说明、ID 不影响执行身份。旧 `segmentation-v3` 缓存文件和既有结果保留，旧请求缓存不参与 SourceTexts 执行。现行格式保留编号 1 和既有请求/阶段缓存身份；格式 0 不再是运行格式。
 
 ## 翻译流程
 
@@ -84,6 +84,13 @@ SegmentationIdentity 与 TranslationIdentity 分别描述本步参数，分句�
 缓存复用、对齐与实际云端参数应以[翻译编排](../../src/Cuelify.Infrastructure/Translation/TranslationOrchestrator.cs)和[云端选项](../../src/Cuelify.Infrastructure/Translation/CloudTranslationOptions.cs)为准；默认值不是服务商永远有效的 API 保证。
 
 ## 桌面状态与配置归属
+
+StageExecutionPolicy 共用步骤快照解析、模型/云端需求、未完成与失败步骤选择及旧分句准入；单媒体、步骤命令和批量执行使用同一 RunMediaCoreAsync/RunBatchCoreAsync。兼容命令仅转发，批量范围和取消状态统一持久化。批量凭证准入按本次实际快照和步骤模型判断，纯本地分句/翻译不解锁凭证。
+
+StageResultReader 统一当前结果与历史预览的缺失/损坏/恢复读取。SubtitleRowsViewModel 分别拥有当前结果与历史预览的行和选择，共用投影、选择保持和完整性判定；TranslationResult.MergeAccepted 只合并相同 ID、原文及时码的成功通知。新结果初始化显式替换，避免重翻重新带入所选旧译文。SubtitleExportService 共用版本冻结、文件名、路径保护、覆盖确认与原子导出。
+
+模型字段由 ModelProfile 的本地/云端字段集维护；阶段捕获使用同一执行字段集，包含本地超时。旧快照缺少超时时仍使用兼容默认值，不能从当前全局配置反推历史值。DesktopJobService 共用分片/VAD/ASR 参数构造及翻译结果换行；RetryDelay 统一延迟上限与 Retry-After 判断，识别/翻译指数退避和分句固定延迟的既有策略保留。ProjectTaskService 收尾先确定失败/取消状态，再等待部分结果写入；分别尝试阶段记录和 task 保存，多个错误保留原始异常，不用写入失败绕过状态收尾。
+
 
 `OperationProgressViewModel` 管理一次显示操作的阶段、计数、用时、取消状态和通知序号；`ProgressStatusView` 与共享 `operation-progress` 样式供步骤、准备、下载、凭证和结果加载复用。主窗口 Activity 保留跨页面活动，后台媒体的进度只投影到匹配媒体/步骤/版本，历史读取使用独立局部等待且不覆盖后台活动。阶段未知总量使用等待，短 I/O 延迟显示；结束停止计时器，旧显示作用域不能关闭或修改新操作。StageWorkProgress 为非持久化进度事件，使用 long 字节/工作量及单位；配置和任务 schema 不变。
 

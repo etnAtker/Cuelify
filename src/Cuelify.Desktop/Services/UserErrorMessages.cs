@@ -9,8 +9,11 @@ namespace Cuelify.Desktop.Services;
 
 internal static class UserErrorMessages
 {
+    public static ServiceCredentialException? CredentialFailure(Exception exception) => exception as ServiceCredentialException ??
+        (exception as AggregateException)?.Flatten().InnerExceptions.OfType<ServiceCredentialException>().FirstOrDefault();
     public static string FromException(Exception exception) => exception switch
     {
+        AggregateException failures => string.Join(" ", failures.Flatten().InnerExceptions.Select(FromException).Distinct()),
         ServiceCredentialException credential => credential.Message,
         TranscriptionFailedException failure => $"{failure.FailedChunks.Count} 个音频片段识别失败。" +
             string.Join(" ", failure.Categories.Values.Select(value => FromCategory(value, "ElevenLabs")).Distinct()) +

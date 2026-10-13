@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Cuelify.Core.Media;
 using Cuelify.Core.Projects;
+using Cuelify.Core.Speech;
 using Cuelify.Core.Subtitles;
 using Cuelify.Core.Translation;
 using Cuelify.Infrastructure.Media;
@@ -53,18 +54,26 @@ public sealed class DesktopJobService(string? root = null) : IDesktopJobService
         Cues = new CueBuilderOptions { ZeroDurationTolerance = TimeSpan.FromMilliseconds(settings.ZeroDurationToleranceMs) },
         Concurrency = settings.AsrConcurrency, MaximumAttempts = settings.MaximumAttempts
     };
-    public Task<ChunkingResult> PrepareChunksAsync(string input, AppSettings settings, string directory, bool restart,
-        IProgress<TranscriptionProgress> progress, CancellationToken token) => Task.Run(async () =>
+    private static ChunkPlannerOptions ChunkOptions(AppSettings settings) => new()
+    {
+        TargetDuration = TimeSpan.FromSeconds(settings.ChunkTargetSeconds), MaximumDuration = TimeSpan.FromSeconds(settings.ChunkMaximumSeconds),
+        SearchRadius = TimeSpan.FromSeconds(settings.ChunkSearchSeconds), ForcedOverlap = TimeSpan.FromMilliseconds(settings.OverlapMs),
+        MaximumUploadBytes = settings.MaximumUploadBytes, AlwaysChunk = settings.AlwaysChunk
+    };
+    private static async Task<(IVoiceActivityDetector Vad, string Signature)> CreateVadAsync(AppSettings settings, CancellationToken token)
     {
         var options = new SileroVadOptions { Threshold = (float)settings.VadThreshold,
             MinimumSpeech = TimeSpan.FromMilliseconds(settings.MinimumSpeechMs), MinimumSilence = TimeSpan.FromMilliseconds(settings.MinimumSilenceMs) };
         var hash = await AtomicFile.HashFileAsync(settings.VadPath, token);
         var signature = AtomicFile.Hash(new { modelHash = hash, vadOptions = options, Version = "silero-16k-v1" });
-        var chunks = new ChunkPlannerOptions { TargetDuration = TimeSpan.FromSeconds(settings.ChunkTargetSeconds),
-            MaximumDuration = TimeSpan.FromSeconds(settings.ChunkMaximumSeconds), SearchRadius = TimeSpan.FromSeconds(settings.ChunkSearchSeconds),
-            ForcedOverlap = TimeSpan.FromMilliseconds(settings.OverlapMs), MaximumUploadBytes = settings.MaximumUploadBytes, AlwaysChunk = settings.AlwaysChunk };
-        return await new ChunkingPipeline(Audio(settings), new SileroVoiceActivityDetector(settings.VadPath, options), signature, Path.Combine(_root, "Jobs"))
-            .RunAsync(input, chunks, directory, progress, token, restart);
+        return (new SileroVoiceActivityDetector(settings.VadPath, options), signature);
+    }
+    public Task<ChunkingResult> PrepareChunksAsync(string input, AppSettings settings, string directory, bool restart,
+        IProgress<TranscriptionProgress> progress, CancellationToken token) => Task.Run(async () =>
+    {
+        var (vad, signature) = await CreateVadAsync(settings, token);
+        return await new ChunkingPipeline(Audio(settings), vad, signature, Path.Combine(_root, "Jobs"))
+            .RunAsync(input, ChunkOptions(settings), directory, progress, token, restart);
     }, token);
     public Task<TranscriptionResult> RecognizeChunksAsync(ChunkingResult prepared, AppSettings settings, string key, string directory,
         bool reuseShared, IReadOnlySet<int>? retryChunks, IProgress<TranscriptionProgress> progress, CancellationToken token) => Task.Run(async () =>
@@ -87,44 +96,37 @@ public sealed class DesktopJobService(string? root = null) : IDesktopJobService
         }
         var engine = await EngineAsync(settings, key, token);
         var generated = await new SubtitlePipelineOrchestrator(engine, directory, reuseShared ? Path.Combine(_root, "Pipelines") : null)
-            .GenerateAsync(source.Words, source.Cues, source.Duration, settings.GetPipeline(), settings.SegmentationSettings(), progress, token, retryBlocks);
+            .GenerateAsync(source.Words, source.Duration, settings.GetPipeline(), settings.SegmentationSettings(), progress, token, retryBlocks);
         generated.ValidateSource(source.Words.Count); return generated;
     }, token);
     public Task<TranslationResult> TranslateStageAsync(IReadOnlyList<SubtitleCue> cues, AppSettings settings, string key, string directory,
-        bool reuseShared, IReadOnlySet<string>? selectedIds, IProgress<TranslationProgress> progress, CancellationToken token) => Task.Run(async () =>
-    {
-        var engine = await EngineAsync(settings, key, token);
-        var result = await new TranslationOrchestrator(engine, directory, reuseShared ? Path.Combine(_root, "Translations") : null)
-            .TranslateAsync(cues, settings.GetProfile(), settings.TranslationSettings(), selectedIds, progress, token, previousCues: cues);
-        return result with { Cues = result.Cues.Select(c => c.TranslatedText is null ? c : c with
-            { TranslatedText = PipelineDisplay.Wrap(c.TranslatedText, settings.GetPipeline().LineCharacters) }).ToArray() };
-    }, token);
+        bool reuseShared, IReadOnlySet<string>? selectedIds, IProgress<TranslationProgress> progress, CancellationToken token) =>
+        TranslateCoreAsync(cues, settings, key, directory, reuseShared ? Path.Combine(_root, "Translations") : null, selectedIds, cues, progress, token);
 
     public Task<TranscriptionResult> TranscribeAsync(string input, AppSettings settings, string key, IProgress<TranscriptionProgress> progress, CancellationToken token) => Task.Run(async () =>
     {
-        var vadOptions = new SileroVadOptions { Threshold = (float)settings.VadThreshold, MinimumSpeech = TimeSpan.FromMilliseconds(settings.MinimumSpeechMs), MinimumSilence = TimeSpan.FromMilliseconds(settings.MinimumSilenceMs) };
-        var hash = await AtomicFile.HashFileAsync(settings.VadPath, token);
-        var signature = AtomicFile.Hash(new { modelHash = hash, vadOptions, Version = "silero-16k-v1" });
-        var asrOptions = new ElevenLabsAsrOptions { ModelId = settings.AsrModel, LanguageCode = string.IsNullOrWhiteSpace(settings.SourceCode) ? null : settings.SourceCode, MaximumUploadBytes = settings.MaximumUploadBytes };
-        var options = new TranscriptionOptions
-        {
-            Cues = new CueBuilderOptions { ZeroDurationTolerance = TimeSpan.FromMilliseconds(settings.ZeroDurationToleranceMs) },
-            Chunks = new ChunkPlannerOptions { TargetDuration = TimeSpan.FromSeconds(settings.ChunkTargetSeconds), MaximumDuration = TimeSpan.FromSeconds(settings.ChunkMaximumSeconds), SearchRadius = TimeSpan.FromSeconds(settings.ChunkSearchSeconds), ForcedOverlap = TimeSpan.FromMilliseconds(settings.OverlapMs), MaximumUploadBytes = settings.MaximumUploadBytes, AlwaysChunk = settings.AlwaysChunk },
-            Concurrency = settings.AsrConcurrency, MaximumAttempts = settings.MaximumAttempts
-        };
-        var pipeline = new TranscriptionPipeline(Audio(settings), new SileroVoiceActivityDetector(settings.VadPath, vadOptions),
-            new ElevenLabsAsrClient(_http, () => key, asrOptions), signature, asrOptions, Path.Combine(_root, "Jobs"));
+        var (vad, signature) = await CreateVadAsync(settings, token);
+        var asrOptions = AsrOptions(settings);
+        var options = RecognitionOptions(settings) with { Chunks = ChunkOptions(settings) };
+        var pipeline = new TranscriptionPipeline(Audio(settings), vad, new ElevenLabsAsrClient(_http, () => key, asrOptions),
+            signature, asrOptions, Path.Combine(_root, "Jobs"));
         var temporary = Path.Combine(_root, "Working", Guid.NewGuid().ToString("N") + ".srt");
         try { return await pipeline.RunAsync(input, temporary, options, progress: progress, cancellationToken: token); }
         finally { if (File.Exists(temporary)) File.Delete(temporary); }
     }, token);
 
-    public Task<TranslationResult> TranslateAsync(IReadOnlyList<SubtitleCue> cues, AppSettings settings, string key, IReadOnlySet<string>? force, IProgress<TranslationProgress> progress, CancellationToken token) => Task.Run(async () =>
+    public Task<TranslationResult> TranslateAsync(IReadOnlyList<SubtitleCue> cues, AppSettings settings, string key, IReadOnlySet<string>? force, IProgress<TranslationProgress> progress, CancellationToken token) =>
+        TranslateCoreAsync(cues, settings, key, Path.Combine(_root, "Translations"), null, force, force is not null ? cues : null, progress, token);
+
+    private Task<TranslationResult> TranslateCoreAsync(IReadOnlyList<SubtitleCue> cues, AppSettings settings, string key, string directory,
+        string? fallback, IReadOnlySet<string>? selectedIds, IReadOnlyList<SubtitleCue>? previousCues,
+        IProgress<TranslationProgress> progress, CancellationToken token) => Task.Run(async () =>
     {
         var engine = await EngineAsync(settings, key, token);
-        var result = await new TranslationOrchestrator(engine, Path.Combine(_root, "Translations")).TranslateAsync(cues, settings.GetProfile(), settings.TranslationSettings(), force, progress, token,
-            previousCues: force is not null ? cues : null);
-        return result with { Cues = result.Cues.Select(c => c.TranslatedText is null ? c : c with { TranslatedText = PipelineDisplay.Wrap(c.TranslatedText, settings.GetPipeline().LineCharacters) }).ToArray() };
+        var result = await new TranslationOrchestrator(engine, directory, fallback)
+            .TranslateAsync(cues, settings.GetProfile(), settings.TranslationSettings(), selectedIds, progress, token, previousCues);
+        return result with { Cues = result.Cues.Select(c => c.TranslatedText is null ? c : c with
+            { TranslatedText = PipelineDisplay.Wrap(c.TranslatedText, settings.GetPipeline().LineCharacters) }).ToArray() };
     }, token);
 
     public Task<SubtitlePipelineResult> GenerateCuesAsync(TranscriptionResult source, AppSettings settings, string key,

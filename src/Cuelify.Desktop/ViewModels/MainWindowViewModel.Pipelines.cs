@@ -12,7 +12,7 @@ public partial class MainWindowViewModel
     {
         get
         {
-            var id = _taskPipelineId ?? (_taskOptionBase ?? _savedSettings).GetPipeline((TranslationProvider)TaskProviderIndex).Id;
+            var id = _taskPipelineId ?? (_taskOptionBase ?? _savedSettings).GetPipeline().Id;
             return TaskPipelineItems.FirstOrDefault(p => p.Id == id);
         }
         set

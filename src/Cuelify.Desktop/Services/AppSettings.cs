@@ -81,12 +81,12 @@ public partial class AppSettings : ObservableObject
         ? LocalOptions().Model.Name : $"{((provider ?? Provider) == TranslationProvider.DeepSeek ? "DeepSeek" : "OpenAI 兼容服务")} · {CloudModel.Trim()} · {BaseUrl.Trim()}";
     public SubtitlePipelineProfile FindPipeline(string id) => AllPipelines.FirstOrDefault(p => p.Id == id)
         ?? throw new ArgumentException("关联的字幕管线不存在，请重新选择。");
-    public SubtitlePipelineProfile GetPipeline(TranslationProvider? provider = null)
+    public SubtitlePipelineProfile GetPipeline()
     {
         if (TaskPipelineId is { } task) return FindPipeline(task);
         return FindPipeline(DefaultPipelineId);
     }
-    public PromptProfile GetProfile(TranslationProvider? provider = null) => GetPipeline(provider).EffectiveTranslation;
+    public PromptProfile GetProfile() => GetPipeline().EffectiveTranslation;
     public void SetDefaultPipeline(string id)
     {
         _ = FindPipeline(id);
@@ -139,16 +139,7 @@ public partial class AppSettings : ObservableObject
             if (result.Provider == TranslationProvider.Local && ModelFiles.TryGetValue(result.LocalOptions().ModelId, out var file))
             { result.ModelPath = file.Path; result.ModelSha256 = file.Sha256; }
         }
-        if (kind == Cuelify.Core.Projects.TaskStage.Subtitles) result.UseSourceTextSegmentation();
         return result;
-    }
-    public void UseSourceTextSegmentation()
-    {
-        var pipeline = GetPipeline();
-        if (pipeline.Method == SegmentationMethod.Model && pipeline.SegmentationFormat == SegmentationOutputFormat.WordEnds)
-        {
-            PipelineLibrary[pipeline.Id] = pipeline with { SegmentationFormat = SegmentationOutputFormat.SourceTexts };
-        }
     }
     public string? StepModelId(Cuelify.Core.Projects.TaskStage kind, Cuelify.Core.Projects.MediaTaskDocument? task = null) =>
         ExecutionModels.GetValueOrDefault(kind) ?? task?.ModelOverrides.GetValueOrDefault(kind) ??

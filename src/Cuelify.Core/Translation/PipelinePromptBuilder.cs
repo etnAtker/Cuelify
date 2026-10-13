@@ -20,10 +20,7 @@ public static class PipelinePromptBuilder
 
     public static IReadOnlyList<PipelineWordBlock> Plan(IReadOnlyList<WordToken> words, SubtitlePipelineProfile profile)
     {
-        profile.ValidateSegmentation();
-        if (words.Any(w => string.IsNullOrWhiteSpace(w.Text) || w.Start < TimeSpan.Zero || w.End < w.Start) ||
-            words.Zip(words.Skip(1)).Any(pair => pair.First.Start > pair.Second.Start))
-            throw new InvalidDataException("原始词文本或时间顺序无效，不能分句。");
+        ValidateInput(words, profile);
         var result = new List<PipelineWordBlock>();
         var first = 0;
         var end = TimeSpan.Zero;
@@ -42,33 +39,18 @@ public static class PipelinePromptBuilder
         return block with { OutputContract = Contract(words, block, profile) };
     }
 
-    public static TranslationRequest Build(IReadOnlyList<WordToken> words, PipelineWordBlock block,
-        SubtitlePipelineProfile profile, TranslationSettings settings)
+    public static void ValidateInput(IReadOnlyList<WordToken> words, SubtitlePipelineProfile profile)
     {
-        if (profile.SegmentationFormat == SegmentationOutputFormat.SourceTexts) return BuildTexts(words, block, profile, settings);
-        var outputContract = Contract(words, block, profile);
-        var values = new Dictionary<string, string>
-        {
-            ["source_language"] = settings.SourceLanguage, ["target_language"] = settings.TargetLanguage, ["target_style"] = settings.TargetStyle,
-            ["source_text"] = string.Concat(words.Skip(block.First).Take(block.Last - block.First + 1).Select(w => w.Text)),
-            ["context_before"] = Tail(string.Concat(words.Take(block.First).Select(w => w.Text)), profile.ContextCharacters),
-            ["context_after"] = string.Concat(words.Skip(block.Last + 1).Select(w => w.Text)).Truncate(profile.ContextCharacters),
-            ["words_json"] = JsonSerializer.Serialize(words.Skip(block.First).Take(block.Last - block.First + 1).Select((w, i) =>
-                new { id = i + block.First, text = w.Text, start = w.Start.TotalSeconds, end = w.End.TotalSeconds, speaker = w.SpeakerId }), JsonOptions),
-            ["boundaries_json"] = JsonSerializer.Serialize(outputContract.AllowedEnds.OrderBy(item => item.Key)
-                .ToDictionary(item => item.Key.ToString(), item => new { first = item.Key, last = item.Value[^1] }), JsonOptions)
-        };
-        string Render(string text) => Regex.Replace(text, @"\{([a-z_]+)\}", m => values[m.Groups[1].Value]);
-        var contract = "仅返回 JSON {\"ends\":[末词ID,...]}。这一阶段不翻译。";
-        contract += $"\n从词 {block.First} 开始逐段选择末词 ID，下一段从上段末词+1开始，最后必须为 {block.Last}。不得漏词、重复或重排。" +
-            $"每条最长 {profile.MaximumCueSeconds} 秒。在此前提下可选择任意词边界，由完整语义决定分句。起点对应的末词 ID 范围（first 到 last，含两端）：{values["boundaries_json"]}。" +
-            $"\n参考前文（不输出）：{values["context_before"]}\n参考后文（不输出）：{values["context_after"]}\n连贯原文（以词表 ID 对齐）：{values["source_text"]}\n待处理词：{values["words_json"]}";
-        var messages = new List<PromptMessage>();
-        if (!string.IsNullOrWhiteSpace(profile.Segmentation.SystemTemplate)) messages.Add(new("system", Render(profile.Segmentation.SystemTemplate)));
-        messages.Add(new("user", Render(profile.Segmentation.UserTemplate) + "\n" + contract));
-        return new([new("block", words[block.First].Start, words[block.Last].End, string.Concat(words.Skip(block.First).Take(block.Last - block.First + 1).Select(w => w.Text)))], messages)
-        { Parameters = profile.Segmentation.Parameters, OutputContract = outputContract };
+        profile.ValidateSegmentation();
+        if (words.Any(w => string.IsNullOrWhiteSpace(w.Text) || w.Start < TimeSpan.Zero || w.End < w.Start) ||
+            words.Zip(words.Skip(1)).Any(pair => pair.First.Start > pair.Second.Start))
+            throw new InvalidDataException("原始词文本或时间顺序无效，不能分句。");
+        if (words.Any(w => (w.End - w.Start).TotalSeconds > profile.MaximumCueSeconds + .001))
+            throw new InvalidDataException("识别词的原始时间跨度超过最长字幕时间，无法在保留词时间的情况下分句。");
     }
+
+    public static TranslationRequest Build(IReadOnlyList<WordToken> words, PipelineWordBlock block,
+        SubtitlePipelineProfile profile, TranslationSettings settings) => BuildTexts(words, block, profile, settings);
 
     public static IReadOnlyList<SourceWordRange> Parse(string response, IReadOnlyList<WordToken> words,
         PipelineWordBlock block, SubtitlePipelineProfile profile)
@@ -79,7 +61,7 @@ public static class PipelinePromptBuilder
     public static GenerationOutputContract Contract(IReadOnlyList<WordToken> words, PipelineWordBlock block, SubtitlePipelineProfile profile) => block.OutputContract ?? new()
     { Kind = GenerationOutputKind.Segmentation, FirstWord = block.First, LastWord = block.Last,
         SegmentationFormat = profile.SegmentationFormat,
-        SourceWords = profile.SegmentationFormat == SegmentationOutputFormat.SourceTexts ? words.Skip(block.First).Take(block.Last - block.First + 1).Select(w => w.Text).ToArray() : null,
+        SourceWords = words.Skip(block.First).Take(block.Last - block.First + 1).Select(w => w.Text).ToArray(),
         AllowedEnds = Choices(words, block, profile.MaximumCueSeconds) };
 
     public static PipelineWordBlock NextBlock(IReadOnlyList<WordToken> words, int first, SubtitlePipelineProfile profile)

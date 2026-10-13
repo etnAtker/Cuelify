@@ -10,19 +10,19 @@ namespace Cuelify.Tests;
 
 public sealed class SubtitlePipelineTests
 {
-    private static SubtitlePipelineProfile Legacy => SubtitlePipelinePresets.TwoStage with { SegmentationFormat = SegmentationOutputFormat.WordEnds };
+    private static SubtitlePipelineProfile Profile => SubtitlePipelinePresets.TwoStage;
     private static WordToken[] Words(int count = 8) => Enumerable.Range(0, count).Select(i =>
         new WordToken($"台词{i}。", TimeSpan.FromSeconds(i * 6), TimeSpan.FromSeconds(i * 6 + 5), null)).ToArray();
 
     [Fact]
     public void BoundariesCannotLoseRepeatReorderWordsOrCrossMaximumDuration()
     {
-        var words = Words(); var pipe = Legacy;
+        var words = Words(); var pipe = Profile;
         var block = PipelinePromptBuilder.Plan(words, pipe)[0];
         Assert.Equal(4, block.Last);
-        var parsed = PipelinePromptBuilder.Parse("{\"ends\":[0,1,2,3,4]}", words, block, pipe);
+        var parsed = PipelinePromptBuilder.Parse("{\"texts\":[\"台词0。\",\"台词1。\",\"台词2。\",\"台词3。\",\"台词4。\"]}", words, block, pipe);
         Assert.Equal(5, parsed.Count);
-        foreach (var invalid in new[] { "{\"ends\":[0,2,3,4]}", "{\"ends\":[0,1,1,2,3,4]}", "{\"ends\":[0,1,2,3]}", "{\"ends\":[4]}", "{\"ends\":[0,1,2,3,4],\"extra\":1}" })
+        foreach (var invalid in new[] { "{\"texts\":[\"台词0。\",\"台词2。\",\"台词3。\",\"台词4。\"]}", "{\"texts\":[\"台词0。\",\"台词1。\",\"台词1。\",\"台词2。\",\"台词3。\",\"台词4。\"]}", "{\"texts\":[\"台词0。\",\"台词1。\",\"台词2。\",\"台词3。\"]}", "{\"texts\":[\"台词4。\"]}", "{\"texts\":[\"台词0。\",\"台词1。\",\"台词2。\",\"台词3。\",\"台词4。\"],\"extra\":1}" })
             Assert.Throws<InvalidDataException>(() => PipelinePromptBuilder.Parse(invalid, words, block, pipe));
         Assert.Throws<InvalidDataException>(() => PipelinePromptBuilder.Plan([new("一整段没有切点", TimeSpan.Zero, TimeSpan.FromSeconds(9), null)], pipe));
     }
@@ -33,7 +33,7 @@ public sealed class SubtitlePipelineTests
         WordToken[] words = [new("你好", TimeSpan.Zero, TimeSpan.FromSeconds(1), null), new("。", TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1), null),
             new("嗯。", TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2.1), null)];
         SourceWordRange[] segments = [new(0, 1), new(2, 2)];
-        var (cues, ranges) = PipelineDisplay.Build(words, segments, Legacy, TimeSpan.FromSeconds(4));
+        var (cues, ranges) = PipelineDisplay.Build(words, segments, Profile, TimeSpan.FromSeconds(4));
         Assert.Equal("你好。嗯。", string.Concat(cues.Select(c => c.SourceText)));
         Assert.Equal(new SourceWordRange(0, 1), ranges[0]); Assert.Equal(TimeSpan.FromSeconds(2.7), cues[1].End);
         Assert.True(cues[0].End <= cues[1].Start); Assert.Equal(TimeSpan.FromSeconds(2.1), words[^1].End);
@@ -47,17 +47,17 @@ public sealed class SubtitlePipelineTests
         var root = Path.Combine(Path.GetTempPath(), "Cuelify-pipeline-" + Guid.NewGuid().ToString("N"));
         try
         {
-            var pipe = Legacy with { Method = mode };
+            var pipe = Profile with { Method = mode };
             var words = Words(); var engine = new Engine();
             var service = new SubtitlePipelineOrchestrator(engine, root);
-            var first = await service.GenerateAsync(words, [], TimeSpan.FromSeconds(48), pipe, new());
+            var first = await service.GenerateAsync(words, TimeSpan.FromSeconds(48), pipe, new());
             Assert.Equal(2, first.EngineCalls); Assert.Equal(8, first.Cues.Count);
             Assert.Equal(string.Concat(words.Select(w => w.Text)), string.Concat(first.Cues.Select(c => c.SourceText)));
             Assert.Equal(new SourceWordRange(0, 0), first.Ranges[0]);
             Assert.All(first.Cues, c => Assert.Null(c.TranslatedText));
-            var second = await service.GenerateAsync(words, [], TimeSpan.FromSeconds(48), pipe with { Name = "改名", Id = "new-id", Description = "备注" }, new());
+            var second = await service.GenerateAsync(words, TimeSpan.FromSeconds(48), pipe with { Name = "改名", Id = "new-id", Description = "备注" }, new());
             Assert.Equal(0, second.EngineCalls); Assert.Equal(2, second.CacheHits);
-            var changed = await service.GenerateAsync(words, [], TimeSpan.FromSeconds(48), pipe with
+            var changed = await service.GenerateAsync(words, TimeSpan.FromSeconds(48), pipe with
                 { Segmentation = pipe.Segmentation with { Parameters = new() { Temperature = .2 } } }, new());
             Assert.Equal(2, changed.EngineCalls); Assert.Equal(.2, engine.LastRequest!.Parameters.Temperature);
         }
@@ -69,7 +69,7 @@ public sealed class SubtitlePipelineTests
     {
         var engine = new Engine();
         SubtitleCue[] cues = [new("old", TimeSpan.Zero, TimeSpan.FromSeconds(1), "Hello.")];
-        var result = await new SubtitlePipelineOrchestrator(engine, "unused").GenerateAsync(Words(), cues, TimeSpan.FromSeconds(48), SubtitlePipelinePresets.Direct, new());
+        var result = await new SubtitlePipelineOrchestrator(engine, "unused").GenerateAsync(Words(), TimeSpan.FromSeconds(48), SubtitlePipelinePresets.Direct, new());
         result.ValidateSource(8); Assert.All(result.Cues, cue => Assert.Null(cue.TranslatedText)); Assert.Null(engine.LastRequest); Assert.Equal(0, result.EngineCalls);
     }
 
@@ -80,12 +80,12 @@ public sealed class SubtitlePipelineTests
         using var cancel = new CancellationTokenSource();
         try
         {
-            var pipe = Legacy with { BlockSeconds = 5 };
+            var pipe = Profile with { BlockSeconds = 5 };
             var engine = new Engine() { CancelOnCall = 2, Cancellation = cancel };
             var service = new SubtitlePipelineOrchestrator(engine, root);
-            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.GenerateAsync(Words(4), [], TimeSpan.FromSeconds(24), pipe, new() { Concurrency = 1 }, token: cancel.Token));
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.GenerateAsync(Words(4), TimeSpan.FromSeconds(24), pipe, new() { Concurrency = 1 }, token: cancel.Token));
             engine.CancelOnCall = 0;
-            var resumed = await service.GenerateAsync(Words(4), [], TimeSpan.FromSeconds(24), pipe, new() { Concurrency = 1 });
+            var resumed = await service.GenerateAsync(Words(4), TimeSpan.FromSeconds(24), pipe, new() { Concurrency = 1 });
             Assert.Equal(1, resumed.CacheHits); Assert.Equal(3, resumed.EngineCalls);
         }
         finally { Directory.Delete(root, true); }
@@ -124,9 +124,9 @@ public sealed class SubtitlePipelineTests
         try
         {
             var engine = new CorrectingEngine(); var service = new SubtitlePipelineOrchestrator(engine, root);
-            var result = await service.GenerateAsync(Words(2), [], TimeSpan.FromSeconds(12), Legacy, new() { RetryDelay = TimeSpan.Zero });
+            var result = await service.GenerateAsync(Words(2), TimeSpan.FromSeconds(12), Profile, new() { RetryDelay = TimeSpan.Zero });
             Assert.Equal(2, result.EngineCalls); Assert.Equal(2, result.Cues.Count);
-            Assert.Equal(0, (await service.GenerateAsync(Words(2), [], TimeSpan.FromSeconds(12), Legacy, new())).EngineCalls);
+            Assert.Equal(0, (await service.GenerateAsync(Words(2), TimeSpan.FromSeconds(12), Profile, new())).EngineCalls);
         }
         finally { Directory.Delete(root, true); }
     }
@@ -136,10 +136,10 @@ public sealed class SubtitlePipelineTests
     {
         WordToken[] words = [new("你好", TimeSpan.Zero, TimeSpan.FromSeconds(1), "a"), new("是的", TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(2), "b"),
             new("再见", TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(6), "b")];
-        var profile = Legacy;
+        var profile = Profile;
         var block = PipelinePromptBuilder.Plan(words, profile)[0];
-        Assert.Equal(3, PipelinePromptBuilder.Parse("{\"ends\":[0,1,2]}", words, block, profile).Count);
-        Assert.Single(PipelinePromptBuilder.Parse("{\"ends\":[2]}", words, block, profile));
+        Assert.Equal(3, PipelinePromptBuilder.Parse("{\"texts\":[\"你好\",\"是的\",\"再见\"]}", words, block, profile).Count);
+        Assert.Single(PipelinePromptBuilder.Parse("{\"texts\":[\"你好是的再见\"]}", words, block, profile));
     }
 
     private sealed class CorrectingEngine : ITranslationEngine
@@ -148,9 +148,9 @@ public sealed class SubtitlePipelineTests
         public string CacheIdentity => "correcting-fixture";
         public Task<TranslationResponse> TranslateAsync(TranslationRequest request, CancellationToken cancellationToken)
         {
-            if (++_calls == 1) return Task.FromResult(new TranslationResponse("{\"ends\":[1]}"));
-            Assert.Contains("分句起点 0 不能选择末词 1", request.Messages[^1].Content);
-            return Task.FromResult(new TranslationResponse("{\"ends\":[0,1]}"));
+            if (++_calls == 1) return Task.FromResult(new TranslationResponse("{\"texts\":[\"台词0。台词1。\"]}"));
+            Assert.Contains("超出最长字幕时间", request.Messages[^1].Content);
+            return Task.FromResult(new TranslationResponse("{\"texts\":[\"台词0。\",\"台词1。\"]}"));
         }
     }
 
@@ -182,22 +182,22 @@ public sealed class SubtitlePipelineTests
     public async Task FailedBlockRetryReusesSuccessAndRecordsRetryAfterLimitFailure()
     {
         using var directory = new TestDirectory();
-        var pipe = Legacy with { BlockSeconds = 5 };
+        var pipe = Profile with { BlockSeconds = 5 };
         var engine = new Engine() { FailureOnCall = 2 };
         var service = new SubtitlePipelineOrchestrator(engine, directory.Path);
         var settings = new TranslationSettings { Concurrency = 1, MaximumAttempts = 2, RetryDelay = TimeSpan.Zero, MaximumRetryDelay = TimeSpan.Zero };
         var states = new Dictionary<string, ProcessingState>();
         var progress = new ProgressSink(value => { foreach (var unit in value.UnitStates ?? new Dictionary<string, ProcessingState>()) states[unit.Key] = unit.Value; });
-        await Assert.ThrowsAsync<TranslationServiceException>(() => service.GenerateAsync(Words(4), [], TimeSpan.FromSeconds(24), pipe, settings, progress));
-        Assert.Equal(4, states.Count); Assert.Equal(2, states.Values.Count(s => s == ProcessingState.NotStarted));
+        await Assert.ThrowsAsync<TranslationServiceException>(() => service.GenerateAsync(Words(4), TimeSpan.FromSeconds(24), pipe, settings, progress));
+        Assert.Equal(3, states.Count); Assert.Single(states.Values, s => s == ProcessingState.NotStarted);
         Assert.Single(states.Values, s => s == ProcessingState.Completed); Assert.Single(states.Values, s => s == ProcessingState.Failed);
         var failed = Assert.Single(Directory.GetFiles(directory.Path, "*.failed", SearchOption.AllDirectories));
         engine.FailureOnCall = 0;
         // 尚未开始的块不能被算为失败重试；先复用成功块，只请求失败块。
-        await Assert.ThrowsAsync<InvalidOperationException>(() => service.GenerateAsync(Words(4), [], TimeSpan.FromSeconds(24), pipe, settings,
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.GenerateAsync(Words(4), TimeSpan.FromSeconds(24), pipe, settings,
             retryBlocks: new HashSet<string> { Path.GetFileName(failed)[..^7] }));
         Assert.Equal(3, engine.Calls); Assert.False(File.Exists(failed));
-        var completed = await service.GenerateAsync(Words(4), [], TimeSpan.FromSeconds(24), pipe, settings, progress);
+        var completed = await service.GenerateAsync(Words(4), TimeSpan.FromSeconds(24), pipe, settings, progress);
         Assert.Equal(2, completed.CacheHits); Assert.Equal(2, completed.EngineCalls);
         Assert.All(states.Values, s => Assert.Equal(ProcessingState.Completed, s));
     }
@@ -214,10 +214,7 @@ public sealed class SubtitlePipelineTests
             if (++Calls == CancelOnCall) { Cancellation!.Cancel(); throw new OperationCanceledException(cancellationToken); }
             if (Calls == FailureOnCall) throw new TranslationServiceException(System.Net.HttpStatusCode.TooManyRequests, TimeSpan.FromSeconds(10));
             LastRequest = request; Assert.NotNull(request.OutputContract);
-            var text = request.Messages.Last().Content;
-            using var json = JsonDocument.Parse(text[(text.LastIndexOf("待处理词：", StringComparison.Ordinal) + 5)..]);
-            var ids = json.RootElement.EnumerateArray().Select(w => w.GetProperty("id").GetInt32()).ToArray();
-            return Task.FromResult(new TranslationResponse(JsonSerializer.Serialize(new { ends = ids })));
+            return Task.FromResult(new TranslationResponse(JsonSerializer.Serialize(new { texts = request.OutputContract!.SourceWords })));
         }
     }
 }
